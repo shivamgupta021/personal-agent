@@ -24,7 +24,7 @@ Read the output in order:
 5. A second `request`: the original input, model output and tool result together.
 6. `answer`: the model's final response, followed by the stop reason.
 
-The loop is `AgentLoop.run_turn` in `src/personal_agent/loop.py`. Python decides what may execute, while the model requests a tool or produces an answer. All response output, including reasoning continuation items, is retained for the next request.
+The loop is `Agent.run` in `src/personal_agent/loop.py`. Python decides what may execute, while the model requests a tool or produces an answer. All response output, including reasoning continuation items, is retained for the next request.
 
 ## Run with your ChatGPT subscription
 
@@ -34,7 +34,7 @@ PYTHONPATH=src uv run python -m personal_agent models
 PYTHONPATH=src uv run python -m personal_agent live --model YOUR_MODEL_SLUG
 ```
 
-Complete **Continue with ChatGPT** in the browser, including permission to use your plan. Choose a model slug printed by `models`; available models are account-specific. Live mode sends the same fixed synthetic exercise. It consumes subscription allowance and never falls back to `OPENAI_API_KEY` or enables recharge. The command prints its collected events when the run ends.
+Complete **Continue with ChatGPT** in the browser, including permission to use your plan. Choose a model slug printed by `models`; available models are account-specific. Live mode sends the same fixed synthetic exercise. It consumes subscription allowance and never falls back to `OPENAI_API_KEY` or enables recharge. The command prints each step as it happens.
 
 Credentials are specific to this application. We do not copy another tool's credentials. They live in the Git-ignored `.local/chatgpt` directory, with owner-only permissions and atomic replacement after refresh. The directory also stores a stable installation ID and registration ID. A process lock serializes commands using that session. `--state-dir` selects a different directory; keep any such directory outside source control.
 
@@ -42,13 +42,13 @@ Login waits at most five minutes on `127.0.0.1:1455`; Ctrl-C cancels. A conflict
 
 ### Why Pydantic appears in the dependencies already
 
-Milestone 1 uses only its documented OAuth/provider helper to handle subscription credentials and refresh. It **does not use `Agent`, model wrappers, tool registration, or an agent harness**. The model/tool loop and tool validation are written here. Milestone 2 will replace that loop with Pydantic AI so we can compare responsibilities without first implementing an OAuth library.
+Milestone 1 uses only its documented OAuth/provider helper to handle subscription credentials and refresh. It **does not use Pydantic AI’s `Agent`, model wrappers, tool registration, or agent harness**. Our small `Agent` class is handwritten. The model/tool loop and tool validation are written here. Milestone 2 will replace that loop with Pydantic AI so we can compare responsibilities without first implementing an OAuth library.
 
 The live transport uses the OpenAI SDK directly: streamed Responses requests, `store=false`, namespace-scoped function tools, and explicit conversation history. A stream must complete successfully before its result is usable. See the official [ChatGPT provider docs](https://pydantic.dev/docs/ai/models/openai-chatgpt/) and [plan-usage limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 ## Limits and failures
 
-Defaults are four model requests, three attempted tool calls, and 30 seconds per model request. SDK retries are disabled in live mode. Unknown tools, wrong namespaces and invalid arguments return a structured tool error; they cannot access real data. Exhausted budgets, timeouts, provider errors, and incomplete or empty responses return a non-success stop reason and a nonzero exit code. The loop never labels these as a completed answer.
+Defaults are four model requests, three attempted tool calls, and 30 seconds per model request. SDK retries are disabled in live mode. Unknown tools, wrong namespaces and invalid arguments return a structured tool error; they cannot access real data. Exhausted budgets, timeouts, provider errors, and incomplete or empty responses raise a short, sanitized error; the CLI displays the reason and exits with a nonzero code. The loop never labels these as a completed answer.
 
 The visible transcript is intended for synthetic data only. Do not adapt this debug output to real grievance content without the metadata-only tracing controls planned for the next milestone. No Langfuse export is configured yet.
 
@@ -63,22 +63,24 @@ Tests enter through the public loop or CLI. Controlled model responses test tool
 
 Verified on 17 November 2026: subscription sign-in, account model discovery, and a real tool-call round trip with `gpt-6.1-sol` succeeded. Python returned the synthetic order and the model answered **1,200 INR**. No real case data or external actions were used.
 
-## Next learning checkpoint
+## Review guide: two things to read first
 
-Run `demo`, then explain which step is the model's decision and which step Python executes. Inspect `AgentLoop.run_turn`, `DemoOrderTool.execute`, and the second request. Once we review this together, milestone 2 can introduce the Pydantic AI harness and privacy-preserving Langfuse tracing.
+1. Open `src/personal_agent/loop.py` and read **`Agent.run()`** top to bottom. Its numbered comments follow five steps: prepare messages, ask the model, return an answer if present, execute a requested tool, and append the result for the next iteration. It returns an answer string. Limits and failures raise ordinary exceptions with safe messages. There are no event or result classes to understand.
+2. In the same file, read **`Agent.get_demo_order()`**. This is the one tool: it validates the request and returns an invented order. The schema below it tells the model how to request this method. Python still validates every request.
 
-## Review guide
+Run `demo` beside those two methods. Find the first request, the tool call, the Python result, and the second request. Explain why the second request contains information the first did not.
 
-Review in this order, with the offline transcript beside the code:
+Everything else can wait:
 
-1. **Tool contract — `DemoOrderTool` in `src/personal_agent/loop.py`.** Read the schema, then `execute`. Can you identify what the model may request and why Python still validates it? Check an unknown tool, wrong order ID, or extra argument: none should return order data.
-2. **One turn — `AgentLoop` in the same module.** Follow history construction, model response, tool execution, tool result, and the next model request. The injected model implements `Model`; `Limits`, `Event`, and `RunResult` describe configuration and outcomes. Identify where request budgets, tool budgets, and timeouts stop execution. History and counters are local to each turn, even if the object is reused.
-3. **Offline versus live — `OfflineModel` in `src/personal_agent/__main__.py` and `ResponsesModel` in `src/personal_agent/subscription.py`.** Both satisfy the same protocol. The offline implementation is scripted; only the live implementation makes model requests. Check that completed raw response items are preserved without SDK-only parsed fields.
-4. **Authentication — `SubscriptionSession` and `CredentialStore` in `src/personal_agent/auth.py`.** The session coordinates sign-in, locking and provider creation; the store loads and atomically saves credentials. Review the code without opening the credentials file. No API-key fallback exists.
-5. **Command flow — `LearningApp` in `src/personal_agent/__main__.py`.** Follow component construction for `demo` and `live`, then transcript printing and error handling. The module-level `main` only starts the application.
-6. **Behavioral evidence — `tests/test_loop.py`, `tests/test_subscription.py`, and `tests/test_cli.py`.** Read each test name, then its input and expected result. Check that the tests verify visible behavior and that controlled responses are not mistaken for real-model quality evaluations.
+- `models.py`: a small typing contract and `OfflineModel`, which scripts the model side for the offline exercise. The scripted answers and order values are synthetic; the loop and validation are real.
+- `subscription.py`: `ResponsesModel` sends the same conversation to a real model. It retains raw stream output, avoiding SDK-only parsing fields on subsequent requests.
+- `auth.py`: working subscription sign-in and protected credentials; unchanged by this simplification. No need to study OAuth to understand the loop.
+- `__main__.py`: `LearningApp` chooses offline or live mode and starts `Agent.run()`. The CLI commands have not changed.
+- `tests/`: behavior checks using controlled model responses, simulated HTTP streaming, and the CLI. They are not evidence of real-model reasoning quality.
 
-The class-based design uses composition and an interchangeable model protocol. It does not need a base-agent inheritance tree. See `CODING_STANDARDS.md` for the project's recorded object-oriented conventions.
+Class-based code remains the convention, but this lesson keeps its core behavior in one `Agent` class. Constructor arguments supply the model and limits directly. Authentication and transport stay separate. See `CODING_STANDARDS.md` for the learning-first exception to broader architectural guidance.
+
+We stop here to review the loop together before introducing Pydantic AI's harness or Langfuse.
 
 ## What is established so far
 

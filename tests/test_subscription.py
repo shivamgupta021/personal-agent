@@ -2,14 +2,15 @@ import asyncio
 import json
 from typing import Any
 
+import pytest
 import httpx2
 from openai import AsyncOpenAI
 
-from personal_agent.loop import AgentLoop
+from personal_agent.loop import Agent
 from personal_agent.subscription import ResponsesModel
 
 
-def test_public_loop_consumes_completed_stream_with_full_tool_history() -> None:
+def test_public_loop_consumes_completed_stream_with_full_tool_history(capsys: pytest.CaptureFixture[str]) -> None:
     requests: list[dict[str, Any]] = []
 
     def respond(request: httpx2.Request) -> httpx2.Response:
@@ -41,14 +42,17 @@ def test_public_loop_consumes_completed_stream_with_full_tool_history() -> None:
     async def exercise() -> None:
         async with AsyncOpenAI(api_key="synthetic-token", max_retries=0,
             http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond))) as client:
-            result = await AgentLoop(ResponsesModel(client, "test-model")).run_turn("What did demo-001 cost?")
-            assert result.answer == "The order cost INR 1200."
-            visible_request = result.events[0].data
+            answer = await Agent(ResponsesModel(client, "test-model")).run("What did demo-001 cost?")
+            assert answer == "The order cost INR 1200."
+            transcript = capsys.readouterr().out
+            # Read the displayed JSON to compare the lesson with the actual HTTP request.
+            visible_request, _ = json.JSONDecoder().raw_decode(transcript.split("[request]\n", 1)[1])
             assert visible_request["model"] == requests[0]["model"]
             assert visible_request["input"][0]["role"] == "developer"
             assert "demo.get_demo_order" in visible_request["input"][0]["content"]
             assert visible_request["input"] == requests[0]["input"]
-            response_event = next(event for event in result.events if event.kind == "response")
-            assert set(response_event.data) == {"status", "output"}
+            response, _ = json.JSONDecoder().raw_decode(transcript.split("[response]\n", 1)[1])
+            assert set(response) == {"status", "output"}
+
 
     asyncio.run(exercise())

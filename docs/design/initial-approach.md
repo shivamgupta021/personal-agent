@@ -71,7 +71,11 @@ This sequence organizes the accepted scope. Pause for shared inspection at each 
 - Credentials are ignored by Git and stored in an owner-only directory with owner-only files. No API-key fallback is configured.
 - The next checkpoint is inspecting this loop together, before adding Pydantic Agent or Langfuse.
 
-## Deferred implementation checks
+## Learning-first simplification
+
+After reviewing milestone 1, the user found the architecture too complex and authorized simplifying it before moving to new tickets. One `Agent` class now contains a direct `run()` loop and a method for the synthetic lookup. It prints progress directly, returns an answer string and raises safe errors on failure. Separate limits, event, result and demo-tool classes are removed. Model transport and authentication remain separate, all imports remain at module scope, and execution/credential protections are retained. Review this change against baseline `df5fb7b`, confirmed by the user.
+
+## Remaining integration checks for later milestones
 
 - Discover and verify the existing local Firecrawl endpoint and search/page-retrieval behavior.
 - Integrate direct ChatGPT subscription authentication and verify this application's tool-call behavior without recording secrets in project files or traces. This is an integration check, not a renewed debate about subscription access.
