@@ -1,6 +1,6 @@
 # Personal grievance assistant MVP
 
-Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary for milestone 1 and requested implementation of that milestone. Publication is pending project issue-tracker configuration; intended triage label: `ready-for-agent`. This spec does not authorize skipping the agreed learning checkpoints.
+Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary for milestone 1 and requested implementation of that milestone. Published as GitHub issue #1 in shivamgupta021/personal-agent with label `ready-for-agent`. This spec does not authorize skipping the agreed learning checkpoints.
 
 ## Problem Statement
 
@@ -116,4 +116,4 @@ The user confirms both prior success with ChatGPT subscription access and an exi
 
 This spec is a synthesis, not an implemented feature. The first deliverable remains a small model/tool-loop learning example. Producing a complete spec does not remove the requirement to review milestones together.
 
-The workspace now has a local Git repository but no project issue-tracker destination or triage configuration. Run `/setup-matt-pocock-skills` to supply that configuration. Once the tracker destination is known, publish this spec with the `ready-for-agent` triage label. No issue has been created or labeled yet.
+The private GitHub repository shivamgupta021/personal-agent is the configured issue tracker. This spec is published as issue #1; milestone 2 is tracked in issue #2. Tracker and triage conventions live in docs/agents/. Milestone 1 is implemented; subsequent milestones remain subject to the learning checkpoints.
