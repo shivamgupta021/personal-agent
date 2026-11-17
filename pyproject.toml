@@ -1,0 +1,22 @@
+[project]
+name = "personal-agent"
+version = "0.1.0"
+description = "An inspectable model/tool loop for learning personal assistants"
+requires-python = ">=3.12"
+dependencies = [
+    "openai==3.52.0",
+    "pydantic-ai-slim[openai]==2.69.0",
+]
+
+[dependency-groups]
+dev = ["pytest==9.2.0", "mypy==2.4.1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+files = ["src", "tests"]
