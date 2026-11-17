@@ -12,6 +12,10 @@ The user prefers class-based, object-oriented Python. Apply this to the applicat
 - Use typed data classes for small result/configuration records.
 - Thin process entry points and small private stateless utilities may remain functions. Core application behavior belongs in classes; adding a class should establish responsibility, not merely rename a function.
 
+## Imports
+
+- Put imports at module scope, at the top of the file. Do not use inline imports inside functions, methods, or control-flow branches.
+
 ## Testing and data boundaries
 
 - Test observable behavior through public interfaces. Tests should continue to describe the same behavior when internal structure changes.

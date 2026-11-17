@@ -5,7 +5,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from personal_agent.auth import SubscriptionSession
 from personal_agent.loop import AgentLoop
+from personal_agent.subscription import ResponsesModel
 
 DEMO_MESSAGE = "Look up the synthetic order demo-001 and tell me its amount and currency."
 
@@ -36,9 +38,6 @@ class LearningApp:
             print("OFFLINE: scripted responses, no network or model usage. Synthetic data only.")
             result = await AgentLoop(OfflineModel()).run_turn(DEMO_MESSAGE)
         else:
-            from personal_agent.auth import SubscriptionSession
-            from personal_agent.subscription import ResponsesModel
-
             session = SubscriptionSession(directory)
             with session.locked():
                 if command == "login":
