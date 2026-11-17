@@ -1,6 +1,6 @@
 # Personal grievance assistant MVP
 
-Status: draft synthesized from the agreed design interview on 17 November 2026. The proposed testing boundary awaits user confirmation. Publication is pending project issue-tracker configuration; intended triage label: `ready-for-agent`. This spec does not authorize skipping the agreed learning checkpoints.
+Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary for milestone 1 and requested implementation of that milestone. Publication is pending project issue-tracker configuration; intended triage label: `ready-for-agent`. This spec does not authorize skipping the agreed learning checkpoints.
 
 ## Problem Statement
 
@@ -84,7 +84,7 @@ Build this in small learning milestones: inspect a minimal model/tool loop first
 ## Testing Decisions
 
 - **Current prior art:** The project contains a glossary, research, and design notes only. There is no application, existing test seam, test suite, or ADR to reuse. Upstream examples informed the design, but they are not tests of this application.
-- **Proposed primary test boundary — awaiting user confirmation:** Submit a normalized owner message or user action through the application-level turn handler and observe the user-facing reply and durable case state. Exercise the agent, tool services, and persistence together through this boundary. This keeps the main suite independent of Telegram transport objects, prompt wording, internal helper calls, and future module rearrangements.
+- **Primary test boundary:** Submit a normalized owner message or user action through the application-level turn handler and observe the user-facing reply and durable case state. For milestone 1, the user confirmed message input, controlled model responses, visible tool steps, final answer, and stopping limits, with a separate live subscription smoke check. Persistence is added in later milestones. Exercise the agent, tool services, and persistence together when available. This keeps the main suite independent of Telegram transport objects, prompt wording, internal helper calls, and future module rearrangements.
 - **External dependencies at that boundary:** Substitute controlled model and research responses for repeatable application tests, while using an isolated real test database. Simulate failures and ambiguous results through those dependencies. Do not mock the case services or persistence merely to assert that internal methods were called.
 - **Good tests:** Check external behavior: correct case association, preserved/corrected facts, appropriate clarification, draft version visibility, saved state after restart, honest failure reporting, deletion, and absence of unauthorized actions. Assert meaningful outcomes rather than exact prose, particular prompts, or incidental tool order.
 - **Small integration checks:** Complement the primary suite with focused checks for Telegram normalization/owner rejection, actual subscription-authenticated tool calling, existing Firecrawl search/page retrieval, and the exported telemetry payload. These verify contracts hidden by controlled test dependencies; they do not require parallel full suites for every internal module.
@@ -115,4 +115,4 @@ The user confirms both prior success with ChatGPT subscription access and an exi
 
 This spec is a synthesis, not an implemented feature. The first deliverable remains a small model/tool-loop learning example. Producing a complete spec does not remove the requirement to review milestones together.
 
-The current workspace is not a Git repository and provides no project issue-tracker destination or triage configuration. Run `/setup-matt-pocock-skills` to supply that configuration. After the proposed test boundary is confirmed and the tracker destination is known, publish this spec with the `ready-for-agent` triage label. No issue has been created or labeled yet.
+The workspace now has a local Git repository but no project issue-tracker destination or triage configuration. Run `/setup-matt-pocock-skills` to supply that configuration. Once the tracker destination is known, publish this spec with the `ready-for-agent` triage label. No issue has been created or labeled yet.
