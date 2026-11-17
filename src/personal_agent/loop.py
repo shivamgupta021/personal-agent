@@ -12,19 +12,6 @@ INSTRUCTIONS = (
     "Never claim to have sent a complaint or requested a real refund."
 )
 
-TOOLS: list[dict[str, Any]] = [{
-    "type": "namespace", "name": "demo",
-    "description": "Read-only synthetic orders for a learning exercise.",
-    "tools": [{
-        "type": "function", "name": "get_demo_order",
-        "description": "Look up the synthetic order demo-001. No real orders exist here.",
-        "strict": True,
-        "parameters": {"type": "object", "properties": {
-            "order_id": {"type": "string", "enum": ["demo-001"]}
-        }, "required": ["order_id"], "additionalProperties": False},
-    }],
-}]
-
 
 class Model(Protocol):
     name: str
@@ -54,68 +41,104 @@ class RunResult:
     events: tuple[Event, ...]
 
 
-def execute_tool(call: dict[str, Any]) -> dict[str, Any]:
-    if call.get("name") != "get_demo_order" or call.get("namespace") != "demo":
-        return {"error": "Only demo.get_demo_order is allowed."}
-    try:
-        arguments = json.loads(call.get("arguments", ""))
-    except (ValueError, TypeError):
-        return {"error": "Arguments must be a JSON object with order_id=demo-001."}
-    if arguments != {"order_id": "demo-001"}:
-        return {"error": "Only the synthetic order demo-001 is available; no extra arguments."}
-    return {"order_id": "demo-001", "currency": "INR", "amount": 1200,
-            "item": "Synthetic headphones", "synthetic": True}
+class DemoOrderTool:
+    """Own the synthetic lookup schema and enforce its execution rules."""
 
+    _schemas: list[dict[str, Any]] = [{
+        "type": "namespace", "name": "demo",
+        "description": "Read-only synthetic orders for a learning exercise.",
+        "tools": [{
+            "type": "function", "name": "get_demo_order",
+            "description": "Look up the synthetic order demo-001. No real orders exist here.",
+            "strict": True,
+            "parameters": {"type": "object", "properties": {
+                "order_id": {"type": "string", "enum": ["demo-001"]}
+            }, "required": ["order_id"], "additionalProperties": False},
+        }],
+    }]
 
-async def run_turn(message: str, model: Model, *, limits: Limits = Limits()) -> RunResult:
-    history: list[dict[str, Any]] = [
-        {"role": "developer", "content": INSTRUCTIONS},
-        {"role": "user", "content": message},
-    ]
-    events: list[Event] = []
-    tool_calls = 0
+    @property
+    def schemas(self) -> list[dict[str, Any]]:
+        return deepcopy(self._schemas)
 
-    def stop(reason: str) -> RunResult:
-        events.append(Event("stopped", {"reason": reason}))
-        return RunResult(None, reason, tuple(events))
-
-    for _ in range(limits.max_requests):
-        events.append(Event("request", deepcopy({"model": model.name, "input": history, "tools": TOOLS})))
+    def execute(self, call: dict[str, Any]) -> dict[str, Any]:
+        if call.get("name") != "get_demo_order" or call.get("namespace") != "demo":
+            return {"error": "Only demo.get_demo_order is allowed."}
         try:
-            async with asyncio.timeout(limits.request_timeout):
-                response = await model.respond(deepcopy(history), deepcopy(TOOLS))
-        except TimeoutError:
-            return stop("timeout")
-        except Exception:
-            # Provider errors can contain tokens or request bodies. Never echo them.
-            return stop("provider_error")
-        events.append(Event("response", deepcopy(response)))
-        output = response.get("output")
-        if response.get("status") != "completed" or not isinstance(output, list):
-            return stop("invalid_response")
-        if any(not isinstance(item, dict) or "type" not in item for item in output):
-            return stop("invalid_response")
-        history.extend(output)
-        calls = [item for item in output if item["type"] == "function_call"]
-        if any(not isinstance(call.get("call_id"), str) or not call["call_id"] for call in calls):
-            return stop("invalid_response")
-        if not calls:
-            answer = "\n".join(
-                part["text"] for item in output if item["type"] == "message"
-                for part in item.get("content", []) if part.get("type") == "output_text"
-            )
-            if not answer.strip():
+            arguments = json.loads(call.get("arguments", ""))
+        except (ValueError, TypeError):
+            return {"error": "Arguments must be a JSON object with order_id=demo-001."}
+        if arguments != {"order_id": "demo-001"}:
+            return {"error": "Only the synthetic order demo-001 is available; no extra arguments."}
+        return {"order_id": "demo-001", "currency": "INR", "amount": 1200,
+                "item": "Synthetic headphones", "synthetic": True}
+
+
+class AgentLoop:
+    """Coordinate one turn using an injected model, tool and execution limits.
+
+    History and events are local to each call; reusing this object does not share
+    conversation state between turns.
+    """
+
+    def __init__(
+        self, model: Model, *, tool: DemoOrderTool | None = None, limits: Limits = Limits()
+    ) -> None:
+        self.model = model
+        self.tool = tool if tool is not None else DemoOrderTool()
+        self.limits = limits
+
+    async def run_turn(self, message: str) -> RunResult:
+        history: list[dict[str, Any]] = [
+            {"role": "developer", "content": INSTRUCTIONS},
+            {"role": "user", "content": message},
+        ]
+        events: list[Event] = []
+        tool_calls = 0
+
+        def stop(reason: str) -> RunResult:
+            events.append(Event("stopped", {"reason": reason}))
+            return RunResult(None, reason, tuple(events))
+
+        for _ in range(self.limits.max_requests):
+            events.append(Event("request", deepcopy({
+                "model": self.model.name, "input": history, "tools": self.tool.schemas,
+            })))
+            try:
+                async with asyncio.timeout(self.limits.request_timeout):
+                    response = await self.model.respond(deepcopy(history), deepcopy(self.tool.schemas))
+            except TimeoutError:
+                return stop("timeout")
+            except Exception:
+                # Provider errors can contain tokens or request bodies. Never echo them.
+                return stop("provider_error")
+            events.append(Event("response", deepcopy(response)))
+            output = response.get("output")
+            if response.get("status") != "completed" or not isinstance(output, list):
                 return stop("invalid_response")
-            events.append(Event("answer", {"text": answer}))
-            return RunResult(answer, "answered", tuple(events))
-        for call in calls:
-            if tool_calls >= limits.max_tool_calls:
-                return stop("tool_limit")
-            tool_calls += 1
-            events.append(Event("tool_call", deepcopy(call)))
-            result = execute_tool(call)
-            tool_output = {"type": "function_call_output", "call_id": call["call_id"],
-                           "output": json.dumps(result)}
-            history.append(tool_output)
-            events.append(Event("tool_result", deepcopy(tool_output)))
-    return stop("request_limit")
+            if any(not isinstance(item, dict) or "type" not in item for item in output):
+                return stop("invalid_response")
+            history.extend(output)
+            calls = [item for item in output if item["type"] == "function_call"]
+            if any(not isinstance(call.get("call_id"), str) or not call["call_id"] for call in calls):
+                return stop("invalid_response")
+            if not calls:
+                answer = "\n".join(
+                    part["text"] for item in output if item["type"] == "message"
+                    for part in item.get("content", []) if part.get("type") == "output_text"
+                )
+                if not answer.strip():
+                    return stop("invalid_response")
+                events.append(Event("answer", {"text": answer}))
+                return RunResult(answer, "answered", tuple(events))
+            for call in calls:
+                if tool_calls >= self.limits.max_tool_calls:
+                    return stop("tool_limit")
+                tool_calls += 1
+                events.append(Event("tool_call", deepcopy(call)))
+                result = self.tool.execute(call)
+                tool_output = {"type": "function_call_output", "call_id": call["call_id"],
+                               "output": json.dumps(result)}
+                history.append(tool_output)
+                events.append(Event("tool_result", deepcopy(tool_output)))
+        return stop("request_limit")

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from personal_agent.loop import Limits, run_turn
+from personal_agent.loop import AgentLoop, Limits
 
 
 class OrderModel:
@@ -31,12 +31,26 @@ class OrderModel:
 
 
 def test_tool_result_reaches_model_and_steps_are_visible() -> None:
-    result = asyncio.run(run_turn("What did demo-001 cost?", OrderModel()))
+    result = asyncio.run(AgentLoop(OrderModel()).run_turn("What did demo-001 cost?"))
     assert result.answer == "The demo order cost INR 1200."
     assert result.stop_reason == "answered"
     assert [event.kind for event in result.events] == [
         "request", "response", "tool_call", "tool_result", "request", "response", "answer"
     ]
+
+
+def test_reusing_an_agent_loop_does_not_share_history_or_budgets_between_turns() -> None:
+    async def exercise() -> None:
+        agent = AgentLoop(OrderModel(), limits=Limits(max_requests=2, max_tool_calls=1))
+        first = await agent.run_turn("First synthetic question")
+        second = await agent.run_turn("Second synthetic question")
+        assert first.stop_reason == second.stop_reason == "answered"
+        assert second.events[0].data["input"][-1] == {
+            "role": "user", "content": "Second synthetic question",
+        }
+        assert "First synthetic question" not in repr(second)
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("name,namespace,arguments", [
@@ -67,7 +81,7 @@ def test_invalid_tool_requests_return_an_error_not_order_data(
                 "call_id": "bad-1", "namespace": namespace, "name": name,
                 "arguments": arguments}]}
 
-    result = asyncio.run(run_turn("Find an order", InvalidModel()))
+    result = asyncio.run(AgentLoop(InvalidModel()).run_turn("Find an order"))
     assert result.answer == "I could not perform that lookup."
 
 
@@ -88,7 +102,7 @@ def test_repeated_tool_requests_stop_at_the_budget(
                 "call_id": f"lookup-{len(history)}", "name": "get_demo_order",
                 "namespace": "demo", "arguments": '{"order_id":"demo-001"}'}]}
 
-    result = asyncio.run(run_turn("Look up the order", RepeatingModel(), limits=limits))
+    result = asyncio.run(AgentLoop(RepeatingModel(), limits=limits).run_turn("Look up the order"))
     assert result.answer is None
     assert result.stop_reason == reason
     assert sum(event.kind == "tool_result" for event in result.events) == executed
@@ -111,7 +125,7 @@ def test_unusable_response_is_not_reported_as_an_answer(response: dict[str, Any]
         ) -> dict[str, Any]:
             return response
 
-    result = asyncio.run(run_turn("Look up the order", UnusableModel()))
+    result = asyncio.run(AgentLoop(UnusableModel()).run_turn("Look up the order"))
     assert result.answer is None
     assert result.stop_reason == "invalid_response"
     assert not any(event.kind == "tool_result" for event in result.events)
@@ -129,8 +143,7 @@ def test_provider_failure_stops_without_exposing_exception_content(timeout: bool
                 await asyncio.sleep(1)
             raise RuntimeError("secret-token-in-provider-error")
 
-    result = asyncio.run(run_turn("Look up the order", FailingModel(),
-                                  limits=Limits(request_timeout=0.01)))
+    result = asyncio.run(AgentLoop(FailingModel(), limits=Limits(request_timeout=0.01)).run_turn("Look up the order"))
     assert result.stop_reason == ("timeout" if timeout else "provider_error")
     assert "secret-token" not in repr(result)
     assert result.answer is None

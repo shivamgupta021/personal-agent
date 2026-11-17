@@ -6,6 +6,7 @@ Status: the user requested implementation and confirmed the milestone-1 testing 
 
 - Personal use and a showcase project; no current monetization goal.
 - User is comfortable with Python and Django.
+- Use class-based, object-oriented Python for core application behavior, with focused responsibilities, composition and injected dependencies. The user explicitly requested this before further tickets; conventions are recorded in CODING_STANDARDS.md.
 - Run the MVP on the user's M4 Pro MacBook Pro; defer hosting selection.
 - Use direct ChatGPT subscription sign-in. The user has a $100 subscription and has used subscription authentication successfully before. Do not make API-credit eligibility or activation a prerequisite.
 

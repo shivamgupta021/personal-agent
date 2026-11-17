@@ -24,7 +24,7 @@ Read the output in order:
 5. A second `request`: the original input, model output and tool result together.
 6. `answer`: the model's final response, followed by the stop reason.
 
-The loop is in `src/personal_agent/loop.py`. Start there: Python decides what may execute, while the model requests a tool or produces an answer. All response output, including reasoning continuation items, is retained for the next request.
+The loop is `AgentLoop.run_turn` in `src/personal_agent/loop.py`. Python decides what may execute, while the model requests a tool or produces an answer. All response output, including reasoning continuation items, is retained for the next request.
 
 ## Run with your ChatGPT subscription
 
@@ -65,4 +65,23 @@ Verified on 17 November 2026: subscription sign-in, account model discovery, and
 
 ## Next learning checkpoint
 
-Run `demo`, then explain which step is the model's decision and which step Python executes. Inspect `run_turn`, `execute_tool`, and the second request. Once we review this together, milestone 2 can introduce the Pydantic AI harness and privacy-preserving Langfuse tracing.
+Run `demo`, then explain which step is the model's decision and which step Python executes. Inspect `AgentLoop.run_turn`, `DemoOrderTool.execute`, and the second request. Once we review this together, milestone 2 can introduce the Pydantic AI harness and privacy-preserving Langfuse tracing.
+
+## Review guide
+
+Review in this order, with the offline transcript beside the code:
+
+1. **Tool contract — `DemoOrderTool` in `src/personal_agent/loop.py`.** Read the schema, then `execute`. Can you identify what the model may request and why Python still validates it? Check an unknown tool, wrong order ID, or extra argument: none should return order data.
+2. **One turn — `AgentLoop` in the same module.** Follow history construction, model response, tool execution, tool result, and the next model request. The injected model implements `Model`; `Limits`, `Event`, and `RunResult` describe configuration and outcomes. Identify where request budgets, tool budgets, and timeouts stop execution. History and counters are local to each turn, even if the object is reused.
+3. **Offline versus live — `OfflineModel` in `src/personal_agent/__main__.py` and `ResponsesModel` in `src/personal_agent/subscription.py`.** Both satisfy the same protocol. The offline implementation is scripted; only the live implementation makes model requests. Check that completed raw response items are preserved without SDK-only parsed fields.
+4. **Authentication — `SubscriptionSession` and `CredentialStore` in `src/personal_agent/auth.py`.** The session coordinates sign-in, locking and provider creation; the store loads and atomically saves credentials. Review the code without opening the credentials file. No API-key fallback exists.
+5. **Command flow — `LearningApp` in `src/personal_agent/__main__.py`.** Follow component construction for `demo` and `live`, then transcript printing and error handling. The module-level `main` only starts the application.
+6. **Behavioral evidence — `tests/test_loop.py`, `tests/test_subscription.py`, and `tests/test_cli.py`.** Read each test name, then its input and expected result. Check that the tests verify visible behavior and that controlled responses are not mistaken for real-model quality evaluations.
+
+The class-based design uses composition and an interchangeable model protocol. It does not need a base-agent inheritance tree. See `CODING_STANDARDS.md` for the project's recorded object-oriented conventions.
+
+## What is established so far
+
+**Working:** a local CLI, a handwritten bounded agent loop, synthetic read-only tool execution, an offline demonstration, direct subscription sign-in, account model discovery, raw streamed Responses transport, protected credential persistence, and behavioral tests. A real synthetic tool-call round trip has succeeded.
+
+**Agreed but not implemented:** the refund-first grievance workflow, Telegram, Django case persistence, local Firecrawl research, metadata-only Langfuse tracing, draft versions, manual sent/outcome updates, follow-up drafts, deletion of cases, and the approximately 20-case product evaluation set. The current automated tests are engineering checks, not that future evaluation set.

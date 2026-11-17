@@ -64,6 +64,7 @@ Build this in small learning milestones: inspect a minimal model/tool loop first
 
 ## Implementation Decisions
 
+- **Code organization:** Use class-based, object-oriented Python for core behavior, as requested after milestone 1. Prefer focused responsibilities, composition and constructor-injected dependencies. Keep only thin entry points and small private stateless utilities as standalone functions.
 - **Runtime and authentication:** Python and Django on the user's M4 Pro MacBook Pro. Use direct ChatGPT subscription sign-in. API-credit activation is not a prerequisite. Do not add automatic paid fallback or recharge. Integrating and checking authentication is implementation work, not a reason to reopen the chosen access route.
 - **Agent architecture:** One Pydantic AI agent with narrow Python tools. Begin with a minimal inspectable loop using synthetic data and a harmless tool before adopting the framework. Specialist agents are deferred.
 - **Application responsibilities:** Keep Telegram transport, application-level turn handling, model/tool execution, case services, research integration, and observability distinct. Django owns durable application records; model conversation history supplies context; traces explain execution. Neither a model answer nor a trace is authoritative evidence of a case outcome.

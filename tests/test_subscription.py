@@ -5,7 +5,7 @@ from typing import Any
 import httpx2
 from openai import AsyncOpenAI
 
-from personal_agent.loop import run_turn
+from personal_agent.loop import AgentLoop
 from personal_agent.subscription import ResponsesModel
 
 
@@ -41,7 +41,7 @@ def test_public_loop_consumes_completed_stream_with_full_tool_history() -> None:
     async def exercise() -> None:
         async with AsyncOpenAI(api_key="synthetic-token", max_retries=0,
             http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond))) as client:
-            result = await run_turn("What did demo-001 cost?", ResponsesModel(client, "test-model"))
+            result = await AgentLoop(ResponsesModel(client, "test-model")).run_turn("What did demo-001 cost?")
             assert result.answer == "The order cost INR 1200."
             visible_request = result.events[0].data
             assert visible_request["model"] == requests[0]["model"]
