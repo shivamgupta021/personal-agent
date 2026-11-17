@@ -17,7 +17,7 @@ The command uses a clearly labeled scripted model stand-in. It makes no network 
 
 Read the output in order:
 
-1. `request`: the message and tool schema offered to the model.
+1. `request`: the selected model, developer instructions, message and tool schema. Transport flags such as streaming and `store=false` are fixed in the transport adapter.
 2. `response`: a structured request to call `demo.get_demo_order`.
 3. `tool_call`: the action Python is about to validate.
 4. `tool_result`: the actual function result, associated with the model's call ID.
@@ -60,6 +60,8 @@ uv run pytest
 ```
 
 Tests enter through the public loop or CLI. Controlled model responses test tool execution, feedback, validation and stopping behavior. A simulated HTTP stream exercises the actual SDK transport; this is not evidence of a successful real subscription request. Live sign-in and a real response are a separate smoke check.
+
+Verified on 17 November 2026: subscription sign-in, account model discovery, and a real tool-call round trip with `gpt-6.1-sol` succeeded. Python returned the synthetic order and the model answered **1,200 INR**. No real case data or external actions were used.
 
 ## Next learning checkpoint
 

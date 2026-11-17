@@ -1,6 +1,6 @@
 # Initial approach — design interview
 
-Status: interview decisions settled; awaiting final confirmation of shared understanding before implementation. Updated 17 November 2026.
+Status: the user requested implementation and confirmed the milestone-1 testing boundary. Milestone 1 is implemented; subsequent milestones await the agreed learning checkpoint. Updated 17 November 2026.
 
 ## Confirmed context
 
@@ -59,7 +59,16 @@ The user confirms an existing local installation. Its endpoint and behavior have
 4. Add refund-case intake, local Firecrawl research, sourced email-style drafts, corrections and draft versions.
 5. Add manual sent/outcome updates and follow-up drafts; run the agreed evaluation cases and review usefulness.
 
-This sequence organizes the accepted scope. Review it with the user before implementation; pause for shared inspection at each milestone. No further product design questions are currently open.
+This sequence organizes the accepted scope. Pause for shared inspection at each milestone. No further product design questions are currently open.
+
+## Milestone 1 implementation checkpoint
+
+- The public loop is exercised with controlled responses, alongside CLI and simulated streaming transport checks.
+- Subscription sign-in, model discovery and a real two-request tool-call round trip succeeded using an account-listed model. The read-only synthetic order returned INR 1200; no real grievance or external action was involved.
+- Pydantic's OAuth/provider helper supplies authentication only. The loop is handwritten and does not use its Agent harness.
+- The live check exposed SDK-only parsed fields being replayed as API input. Raw streaming events now preserve API-compatible output; a regression test guards that boundary.
+- Credentials are ignored by Git and stored in an owner-only directory with owner-only files. No API-key fallback is configured.
+- The next checkpoint is inspecting this loop together, before adding Pydantic Agent or Langfuse.
 
 ## Deferred implementation checks
 

@@ -24,6 +24,7 @@ def test_public_loop_consumes_completed_stream_with_full_tool_history() -> None:
                        "call_id": "c1", "namespace": "demo", "name": "get_demo_order",
                        "arguments": '{"order_id":"demo-001"}'}]
         else:
+            assert "parsed_arguments" not in body["input"][-2]
             assert body["input"][-1]["call_id"] == "c1"
             assert json.loads(body["input"][-1]["output"])["amount"] == 1200
             output = [{"type": "message", "id": "msg_1", "role": "assistant",
@@ -42,5 +43,12 @@ def test_public_loop_consumes_completed_stream_with_full_tool_history() -> None:
             http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond))) as client:
             result = await run_turn("What did demo-001 cost?", ResponsesModel(client, "test-model"))
             assert result.answer == "The order cost INR 1200."
+            visible_request = result.events[0].data
+            assert visible_request["model"] == requests[0]["model"]
+            assert visible_request["input"][0]["role"] == "developer"
+            assert "demo.get_demo_order" in visible_request["input"][0]["content"]
+            assert visible_request["input"] == requests[0]["input"]
+            response_event = next(event for event in result.events if event.kind == "response")
+            assert set(response_event.data) == {"status", "output"}
 
     asyncio.run(exercise())

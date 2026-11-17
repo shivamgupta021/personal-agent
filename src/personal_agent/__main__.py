@@ -13,6 +13,8 @@ DEMO_MESSAGE = "Look up the synthetic order demo-001 and tell me its amount and 
 class OfflineModel:
     """A scripted model stand-in, not AI inference."""
 
+    name = "scripted-offline"
+
     async def respond(
         self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]:

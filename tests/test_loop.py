@@ -8,6 +8,8 @@ from personal_agent.loop import Limits, run_turn
 
 
 class OrderModel:
+    name = "controlled-order-model"
+
     async def respond(
         self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]:
@@ -49,6 +51,8 @@ def test_invalid_tool_requests_return_an_error_not_order_data(
     name: str, namespace: str, arguments: str
 ) -> None:
     class InvalidModel:
+        name = "controlled-invalid-model"
+
         async def respond(
             self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
         ) -> dict[str, Any]:
@@ -75,6 +79,8 @@ def test_repeated_tool_requests_stop_at_the_budget(
     limits: Limits, reason: str, executed: int
 ) -> None:
     class RepeatingModel:
+        name = "controlled-repeating-model"
+
         async def respond(
             self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
         ) -> dict[str, Any]:
@@ -98,6 +104,8 @@ def test_repeated_tool_requests_stop_at_the_budget(
 ])
 def test_unusable_response_is_not_reported_as_an_answer(response: dict[str, Any]) -> None:
     class UnusableModel:
+        name = "controlled-unusable-model"
+
         async def respond(
             self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
         ) -> dict[str, Any]:
@@ -112,6 +120,8 @@ def test_unusable_response_is_not_reported_as_an_answer(response: dict[str, Any]
 @pytest.mark.parametrize("timeout", [True, False])
 def test_provider_failure_stops_without_exposing_exception_content(timeout: bool) -> None:
     class FailingModel:
+        name = "controlled-failing-model"
+
         async def respond(
             self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
         ) -> dict[str, Any]:

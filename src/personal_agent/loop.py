@@ -6,6 +6,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+INSTRUCTIONS = (
+    "You are running a synthetic learning exercise. Use demo.get_demo_order "
+    "to look up demo-001 before answering. Do not invent order facts. "
+    "Never claim to have sent a complaint or requested a real refund."
+)
+
 TOOLS: list[dict[str, Any]] = [{
     "type": "namespace", "name": "demo",
     "description": "Read-only synthetic orders for a learning exercise.",
@@ -21,6 +27,8 @@ TOOLS: list[dict[str, Any]] = [{
 
 
 class Model(Protocol):
+    name: str
+
     async def respond(
         self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]: ...
@@ -60,7 +68,10 @@ def execute_tool(call: dict[str, Any]) -> dict[str, Any]:
 
 
 async def run_turn(message: str, model: Model, *, limits: Limits = Limits()) -> RunResult:
-    history: list[dict[str, Any]] = [{"role": "user", "content": message}]
+    history: list[dict[str, Any]] = [
+        {"role": "developer", "content": INSTRUCTIONS},
+        {"role": "user", "content": message},
+    ]
     events: list[Event] = []
     tool_calls = 0
 
@@ -69,7 +80,7 @@ async def run_turn(message: str, model: Model, *, limits: Limits = Limits()) -> 
         return RunResult(None, reason, tuple(events))
 
     for _ in range(limits.max_requests):
-        events.append(Event("request", deepcopy({"input": history, "tools": TOOLS})))
+        events.append(Event("request", deepcopy({"model": model.name, "input": history, "tools": TOOLS})))
         try:
             async with asyncio.timeout(limits.request_timeout):
                 response = await model.respond(deepcopy(history), deepcopy(TOOLS))

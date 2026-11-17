@@ -9,20 +9,26 @@ from openai.types.responses import ResponseInputParam, ToolParam
 class ResponsesModel:
     def __init__(self, client: AsyncOpenAI, model: str) -> None:
         self.client = client
-        self.model = model
+        self.name = model
 
     async def respond(
         self, history: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        async with self.client.responses.stream(
-            model=self.model,
-            instructions=("You are running a synthetic learning exercise. Use demo.get_demo_order "
-                          "to look up demo-001 before answering. Do not invent order facts. "
-                          "Never claim to have sent a complaint or requested a real refund."),
+        async with await self.client.responses.create(
+            model=self.name,
             input=cast(ResponseInputParam, history),
             tools=cast(list[ToolParam], tools),
             include=["reasoning.encrypted_content"],
             store=False,
+            stream=True,
         ) as stream:
-            response = await stream.get_final_response()
-        return response.model_dump(mode="json", exclude_none=True)
+            async for event in stream:
+                if event.type == "response.completed":
+                    return {
+                        "status": event.response.status,
+                        "output": [item.model_dump(mode="json", exclude_none=True)
+                                   for item in event.response.output],
+                    }
+                if event.type in {"response.failed", "response.incomplete", "error"}:
+                    raise RuntimeError("The response did not complete.")
+        raise RuntimeError("The stream ended before response.completed.")
