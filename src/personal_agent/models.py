@@ -28,4 +28,3 @@ class OfflineModel:
         return {"status": "completed", "output": [{"type": "function_call",
             "namespace": "demo", "name": "get_demo_order", "call_id": "demo-lookup-1",
             "arguments": '{"order_id":"demo-001"}'}]}
-
