@@ -34,3 +34,9 @@ The user prefers class-based, object-oriented Python. Apply this to the applicat
 
 - Organize features as Django apps. Management commands validate input and call application services; keep entry points thin.
 - Give code walkthroughs in chat when requested, rather than adding standalone walkthrough documents.
+
+## Project layout
+
+- Keep `manage.py`, `config/`, and Django application packages at the repository root. Do not add a `src/` wrapper or a package `__main__.py`.
+- Use `service.py` for an app's service module. Agent invocation stays behind the application service.
+- Use framework-default tool scheduling unless a concrete requirement calls for an override.

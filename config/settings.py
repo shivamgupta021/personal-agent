@@ -3,18 +3,18 @@
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parents[3]
+BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'local-command-only-development-key')
 DEBUG = False
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 INSTALLED_APPS = [
-    'personal_agent.core.apps.CoreConfig',
-    'personal_agent.subscriptions.apps.SubscriptionsConfig',
-    'personal_agent.research.apps.ResearchConfig',
+    'core.apps.CoreConfig',
+    'subscriptions.apps.SubscriptionsConfig',
+    'research.apps.ResearchConfig',
 ]
-ROOT_URLCONF = 'personal_agent.config.urls'
-WSGI_APPLICATION = 'personal_agent.config.wsgi.application'
-ASGI_APPLICATION = 'personal_agent.config.asgi.application'
+ROOT_URLCONF = 'config.urls'
+WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
 DATABASES = {'default': {'ENGINE': 'django.db.backends.dummy'}}
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 USE_TZ = True
@@ -33,6 +33,9 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {'console': {'format': '%(levelname)s %(name)s: %(message)s'}},
     'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'console'}},
-    'loggers': {'personal_agent': {'handlers': ['console'], 'level': 'INFO', 'propagate': False}},
+    'loggers': {
+        name: {'handlers': ['console'], 'level': 'INFO', 'propagate': False}
+        for name in ('core', 'research', 'subscriptions')
+    },
 }
 os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')

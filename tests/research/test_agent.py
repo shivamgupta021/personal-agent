@@ -9,13 +9,13 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from personal_agent.research.tools.firecrawl import Firecrawl
-from personal_agent.research.agent import ResearchAgent
-from personal_agent.research import constants
+from research.tools.firecrawl import Firecrawl
+from research.agent import ResearchAgent
+from research import constants
 
 
 def test_research_searches_reads_and_answers_with_fresh_history(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger='personal_agent')
+    caplog.set_level(logging.INFO, logger='research')
     requests: list[str] = []
 
     def web(request: httpx2.Request) -> httpx2.Response:
@@ -152,7 +152,7 @@ def test_agent_can_read_later_sections_of_a_long_page() -> None:
 
 
 def test_rejected_credential_url_is_not_printed(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger='personal_agent')
+    caplog.set_level(logging.INFO, logger='research')
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
             return ModelResponse(parts=[TextPart('Please use a public URL without credentials.')])

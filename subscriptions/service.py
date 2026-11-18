@@ -9,8 +9,8 @@ from openai import AsyncOpenAI
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 from pydantic_ai.providers.openai_chatgpt import OpenAIChatGPTProvider
 
-from personal_agent.subscriptions import constants
-from personal_agent.subscriptions.auth import SubscriptionSession
+from subscriptions import constants
+from subscriptions.auth import SubscriptionSession
 
 
 class SubscriptionService:
@@ -34,7 +34,6 @@ class SubscriptionService:
                 name, provider=OpenAIChatGPTProvider(openai_client=client),
                 settings=OpenAIResponsesModelSettings(
                     openai_store=False, timeout=constants.MODEL_TIMEOUT_SECONDS,
-                    parallel_tool_calls=False,
                 ),
             )
 

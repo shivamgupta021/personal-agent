@@ -6,8 +6,8 @@ from typing import Any, TypeVar
 
 from django.core.management.base import CommandError
 
-from personal_agent.core.errors import user_error_message
-from personal_agent.core.tracing import tracing
+from core.errors import user_error_message
+from core.tracing import tracing
 
 Result = TypeVar('Result')
 

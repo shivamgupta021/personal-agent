@@ -11,9 +11,9 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCall
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from requests import PreparedRequest, Response, Session
 
-from personal_agent.core.tracing import tracing
-from personal_agent.research.agent import ResearchAgent
-from personal_agent.research.tools.firecrawl import Firecrawl
+from core.tracing import tracing
+from research.agent import ResearchAgent
+from research.tools.firecrawl import Firecrawl
 
 
 class CaptureSession(Session):

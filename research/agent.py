@@ -2,12 +2,11 @@
 
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
-from pydantic_ai.tools import Tool
 from pydantic_ai.usage import UsageLimits
 
-from personal_agent.research import constants
-from personal_agent.research.tools.firecrawl import Firecrawl
-from personal_agent.research.prompts import RESEARCH_INSTRUCTIONS
+from research import constants
+from research.tools.firecrawl import Firecrawl
+from research.prompts import RESEARCH_INSTRUCTIONS
 
 
 class ResearchAgent:
@@ -17,8 +16,7 @@ class ResearchAgent:
             instructions=RESEARCH_INSTRUCTIONS,
             name='research',
             retries=constants.AGENT_VALIDATION_RETRIES,
-            # Serialize tool execution to keep local service load predictable.
-            tools=[Tool(firecrawl.search, sequential=True), Tool(firecrawl.read_page, sequential=True)],
+            tools=[firecrawl.search, firecrawl.read_page],
         )
 
     async def run(self, message: str) -> str:

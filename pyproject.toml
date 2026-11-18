@@ -21,11 +21,10 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["."]
 testpaths = ["tests"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "src"
-files = ["src", "tests", "manage.py"]
+files = ["config", "core", "research", "subscriptions", "tests", "manage.py"]

@@ -11,7 +11,7 @@ uv run python manage.py models
 uv run python manage.py research "Find Python's official explanation of asyncio.timeout and explain deadline expiry with sources." --model gpt-6.1-sol
 ```
 
-Use an available model slug from `models`. Run `uv run python manage.py login` if sign-in is required. Existing credentials remain in `.local/chatgpt`; no API-key fallback is used. `--state-dir` remains available. The compatibility entry point `PYTHONPATH=src uv run python -m personal_agent research ...` dispatches the same Django command.
+Use an available model slug from `models`. Run `uv run python manage.py login` if sign-in is required. Existing credentials remain in `.local/chatgpt`; no API-key fallback is used. `--state-dir` remains available.
 
 Each research command starts fresh conversation history and consumes subscription usage. Firecrawl defaults to `http://127.0.0.1:3002`; override it with `FIRECRAWL_BASE_URL`. Set `FIRECRAWL_API_KEY` if your installation requires one. Environment variables are read by Django settings; `.env` files are not loaded automatically.
 
@@ -19,21 +19,21 @@ Each research command starts fresh conversation history and consumes subscriptio
 
 ```text
 manage.py
-src/personal_agent/
-  config/          Django settings, logging, URL and server entry points
-  core/            App startup, native tracing, safe command error boundary
-  research/        Agent, prompts, limits, application service, Firecrawl tools
-    management/commands/research.py
-  subscriptions/   Existing authentication, credential storage, model construction
-    management/commands/login.py
-    management/commands/models.py
+config/            Django settings, logging, URL and server entry points
+core/              App startup, native tracing, safe command error boundary
+research/          Agent, prompts, limits, service.py, Firecrawl tools
+  management/commands/research.py
+subscriptions/     Authentication, credentials, service.py, model construction
+  management/commands/login.py
+  management/commands/models.py
 tests/
   research/        Public agent/tool behavior
-  core/            Serialized native tracing payloads and privacy
+  core/            Native tracing payloads and privacy
   test_commands.py Django command checks
+docs/              Specifications, design notes, and research
 ```
 
-The research agent uses Pydantic AI's high-level `run()`. The model plans one to three complementary queries per search batch; Python bounds and executes them, deduplicates sources, and reports partial failures. This is an instruction and schema constraint, not a guarantee of research quality. `sequential=True` is retained for predictable local service load.
+The research agent uses Pydantic AI's high-level `run()`. The model plans one to three complementary queries per search batch; Python bounds and executes them, deduplicates sources, and reports partial failures. This is an instruction and schema constraint, not a guarantee of research quality. Tool scheduling uses Pydantic AI and provider defaults; independent tool calls may run concurrently.
 
 ## Configuration and boundaries
 

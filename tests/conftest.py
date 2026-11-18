@@ -1,3 +1,3 @@
 import os
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'personal_agent.config.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')

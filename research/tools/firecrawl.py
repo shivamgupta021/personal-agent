@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import httpx2
 from pydantic import Field, StringConstraints
 
-from personal_agent.research import constants
+from research import constants
 
 logger = logging.getLogger(__name__)
 SearchQuery = Annotated[str, StringConstraints(

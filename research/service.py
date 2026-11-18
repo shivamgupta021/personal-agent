@@ -3,9 +3,9 @@
 import httpx2
 from django.conf import settings
 
-from personal_agent.research.agent import ResearchAgent
-from personal_agent.research.tools.firecrawl import Firecrawl
-from personal_agent.subscriptions.services import SubscriptionService
+from research.agent import ResearchAgent
+from research.tools.firecrawl import Firecrawl
+from subscriptions.service import SubscriptionService
 
 
 class ResearchService:

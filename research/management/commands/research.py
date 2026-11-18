@@ -4,10 +4,10 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from personal_agent.core.commands import run_async
-from personal_agent.research.constants import MAX_MESSAGE_CHARACTERS
-from personal_agent.research.services import ResearchService
-from personal_agent.subscriptions.services import SubscriptionService
+from core.commands import run_async
+from research.constants import MAX_MESSAGE_CHARACTERS
+from research.service import ResearchService
+from subscriptions.service import SubscriptionService
 
 
 class Command(BaseCommand):

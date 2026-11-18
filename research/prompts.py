@@ -1,6 +1,6 @@
 """Version-controlled research instructions; independent of agent construction."""
 
-from personal_agent.research import constants
+from research import constants
 
 RESEARCH_INSTRUCTIONS = f"""You are a public-web research assistant.
 
