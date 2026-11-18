@@ -22,3 +22,12 @@ The user prefers class-based, object-oriented Python. Apply this to the applicat
 - Keep real subscription integration checks separate from controlled model/HTTP tests.
 - Keep credentials outside source control and diagnostic output. Use synthetic data in controlled tests.
 - Run typechecking and relevant tests after refactoring. Preserve the agreed milestone scope.
+
+## Configuration, observability, and errors
+
+- Put policy limits, retries, and response-size defaults in `constants.py`; keep agent constructors focused on their actual dependencies.
+- Keep prompts separate from agent construction and shared status vocabulary in `enums.py`.
+- Initialize shared tracing at application startup. Keep run-specific metadata isolated even when the connection is shared.
+- Use module loggers for progress and diagnostics. Reserve CLI prints for user-facing answers, model listings, and interactive sign-in instructions.
+- Use Pydantic AI's high-level `run()` unless the application actually needs control over graph nodes.
+- Convert recoverable HTTP failures into tool results at the service boundary. Let run failures reach the CLI for sanitized reporting; never log raw provider exceptions or tool arguments.

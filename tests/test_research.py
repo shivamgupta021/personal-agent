@@ -1,18 +1,22 @@
 import asyncio
 import json
+import logging
 from typing import Any
 
 import httpx2
 import pytest
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from personal_agent.firecrawl import Firecrawl
 from personal_agent.research import ResearchAgent
-from personal_agent.telemetry import LangfuseTrace
+from personal_agent.telemetry import tracing
+from personal_agent import constants
 
 
-def test_research_searches_reads_and_answers_with_fresh_history(capsys: pytest.CaptureFixture[str]) -> None:
+def test_research_searches_reads_and_answers_with_fresh_history(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger='personal_agent')
     requests: list[str] = []
 
     def web(request: httpx2.Request) -> httpx2.Response:
@@ -28,7 +32,7 @@ def test_research_searches_reads_and_answers_with_fresh_history(capsys: pytest.C
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
         if not results:
-            return ModelResponse(parts=[ToolCallPart('search', {'query': 'Example returns policy'})])
+            return ModelResponse(parts=[ToolCallPart('search', {'queries': ['Example returns policy']})])
         if len(results) == 1:
             assert 'https://example.com/returns' in str(results[0].content)
             return ModelResponse(parts=[ToolCallPart('read_page', {'url': 'https://example.com/returns'})])
@@ -46,14 +50,15 @@ def test_research_searches_reads_and_answers_with_fresh_history(capsys: pytest.C
         assert requests == ['/v2/search', '/v2/scrape'] * 2
 
     asyncio.run(exercise())
-    transcript = capsys.readouterr().out
-    assert '[tool] search' in transcript
-    assert '[tool] read_page' in transcript
-    assert '[model] request 3' in transcript
+    assert 'Tool started: search' in caplog.text
+    assert 'Tool started: read_page' in caplog.text
+    assert 'requests=3' in caplog.text
 
 
 @pytest.mark.parametrize('max_requests,max_tools', [(1, 10), (8, 0)])
-def test_research_stops_before_exceeding_execution_budget(max_requests: int, max_tools: int) -> None:
+def test_research_stops_before_exceeding_execution_budget(max_requests: int, max_tools: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(constants, "MAX_MODEL_REQUESTS", max_requests)
+    monkeypatch.setattr(constants, "MAX_TOOL_CALLS", max_tools)
     calls: list[str] = []
 
     def web(request: httpx2.Request) -> httpx2.Response:
@@ -61,28 +66,28 @@ def test_research_stops_before_exceeding_execution_budget(max_requests: int, max
         return httpx2.Response(200, json={'success': True, 'data': {'web': []}})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart('search', {'query': 'public topic'})])
+        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['public topic']})])
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            agent = ResearchAgent(FunctionModel(model), Firecrawl(client),
-                                  max_requests=max_requests, max_tool_calls=max_tools)
-            with pytest.raises(RuntimeError, match='^execution_limit$'):
+            agent = ResearchAgent(FunctionModel(model), Firecrawl(client))
+            with pytest.raises(UsageLimitExceeded):
                 await agent.run('Research a public topic')
         assert len(calls) == (0 if max_tools == 0 else 1)
 
     asyncio.run(exercise())
 
 
-def test_research_timeout_is_sanitized() -> None:
+def test_research_timeout_stops_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(constants, "RUN_TIMEOUT_SECONDS", 0.01)
     async def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         await asyncio.sleep(1)
         return ModelResponse(parts=[TextPart('too late')])
 
     async def exercise() -> None:
         async with httpx2.AsyncClient() as client:
-            with pytest.raises(RuntimeError, match='^timeout$'):
-                await ResearchAgent(FunctionModel(model), Firecrawl(client), timeout=0.01).run('Topic')
+            with pytest.raises(TimeoutError):
+                await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Topic')
 
     asyncio.run(exercise())
 
@@ -107,14 +112,15 @@ def test_research_exports_only_metadata_and_survives_trace_failure(trace_status:
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
             return ModelResponse(parts=[TextPart('private-answer')])
-        return ModelResponse(parts=[ToolCallPart('search', {'query': 'private-query'})])
+        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['private-query']})])
 
     async def exercise() -> None:
         async with (httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as web_client,
                     httpx2.AsyncClient(base_url='http://langfuse', auth=('public-key', 'secret-token'),
                                       transport=httpx2.MockTransport(trace)) as trace_client):
-            agent = ResearchAgent(FunctionModel(model), Firecrawl(web_client), tracing=LangfuseTrace(trace_client))
-            assert await agent.run('private-prompt') == 'private-answer'
+            async with tracing.startup(client=trace_client):
+                agent = ResearchAgent(FunctionModel(model), Firecrawl(web_client))
+                assert await agent.run('private-prompt') == 'private-answer'
         span = exported[0]['resourceSpans'][0]['scopeSpans'][0]['spans'][0]
         attrs = {a['key']: a['value'] for a in span['attributes']}
         assert attrs['agent.tool_names']['stringValue'] == 'search'
@@ -184,7 +190,8 @@ def test_agent_can_read_later_sections_of_a_long_page() -> None:
     asyncio.run(exercise())
 
 
-def test_rejected_credential_url_is_not_printed(capsys: pytest.CaptureFixture[str]) -> None:
+def test_rejected_credential_url_is_not_printed(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger='personal_agent')
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
             return ModelResponse(parts=[TextPart('Please use a public URL without credentials.')])
@@ -195,4 +202,146 @@ def test_rejected_credential_url_is_not_printed(capsys: pytest.CaptureFixture[st
             await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Read a page')
 
     asyncio.run(exercise())
-    assert 'secret-password' not in capsys.readouterr().out
+    assert 'secret-password' not in caplog.text
+
+
+def test_planned_queries_are_searched_once_and_sources_are_deduplicated() -> None:
+    queries: list[str] = []
+
+    def web(request: httpx2.Request) -> httpx2.Response:
+        query = json.loads(request.content)['query']
+        queries.append(query)
+        if query == 'support procedure':
+            return httpx2.Response(503)
+        return httpx2.Response(200, json={'success': True, 'data': {'web': [
+            {'url': 'https://example.com/policy', 'title': 'Policy'},
+            {'url': f'https://example.com/{len(queries)}', 'title': 'Details'},
+        ]}})
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
+        if not results:
+            return ModelResponse(parts=[ToolCallPart('search', {
+                'queries': ['official policy', 'eligibility exceptions', 'support procedure'],
+            })])
+        content = results[-1].content
+        assert isinstance(content, dict)
+        sources = content.get('sources')
+        assert isinstance(sources, list) and len(sources) == 3
+        assert content.get('failed_queries') == 1
+        return ModelResponse(parts=[TextPart('Policy evidence found; support search was unavailable.')])
+
+    async def exercise() -> None:
+        async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
+            answer = await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Find policy and support options')
+            assert 'support search was unavailable' in answer
+        assert queries == ['official policy', 'eligibility exceptions', 'support procedure']
+
+    asyncio.run(exercise())
+
+
+def test_query_batch_limit_prevents_excess_web_requests() -> None:
+    requests: list[str] = []
+
+    def web(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request.url.path)
+        return httpx2.Response(200, json={'success': True, 'data': {'web': []}})
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['a', 'b', 'c', 'd']})])
+
+    async def exercise() -> None:
+        async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
+            with pytest.raises(UnexpectedModelBehavior):
+                await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Search')
+        assert requests == []
+
+    asyncio.run(exercise())
+
+
+def test_shared_tracing_keeps_concurrent_runs_separate() -> None:
+    exported: list[dict[str, Any]] = []
+
+    def export(request: httpx2.Request) -> httpx2.Response:
+        exported.append(json.loads(request.content)['resourceSpans'][0]['scopeSpans'][0]['spans'][0])
+        return httpx2.Response(200, json={})
+
+    async def web(request: httpx2.Request) -> httpx2.Response:
+        await asyncio.sleep(0)
+        data: dict[str, Any] = {'web': []} if request.url.path == '/v2/search' else {'markdown': 'Public page'}
+        return httpx2.Response(200, json={'success': True, 'data': data})
+
+    def search_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
+            return ModelResponse(parts=[TextPart('Search finished')])
+        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['public topic']})])
+
+    def read_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
+            return ModelResponse(parts=[TextPart('Read finished')])
+        return ModelResponse(parts=[ToolCallPart('read_page', {'url': 'https://example.com'})])
+
+    async def exercise() -> None:
+        async with (httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client,
+                    httpx2.AsyncClient(base_url='http://langfuse', transport=httpx2.MockTransport(export)) as trace_client,
+                    tracing.startup(client=trace_client)):
+            answers = await asyncio.gather(
+                ResearchAgent(FunctionModel(search_model), Firecrawl(client)).run('Search'),
+                ResearchAgent(FunctionModel(read_model), Firecrawl(client)).run('Read'),
+            )
+            assert tuple(answers) == ('Search finished', 'Read finished')
+        assert len({span['traceId'] for span in exported}) == 2
+        names = []
+        for span in exported:
+            attrs = {a['key']: a['value'] for a in span['attributes']}
+            names.append(attrs['agent.tool_names']['stringValue'])
+            assert attrs['agent.requests']['intValue'] == '2'
+            assert attrs['agent.tool_calls']['intValue'] == '1'
+        assert sorted(names) == ['read_page', 'search']
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_run_exports_cancelled_status_and_propagates_cancellation() -> None:
+    exported: list[dict[str, Any]] = []
+
+    def export(request: httpx2.Request) -> httpx2.Response:
+        exported.append(json.loads(request.content))
+        return httpx2.Response(200, json={})
+
+    async def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise asyncio.CancelledError()
+
+    async def exercise() -> None:
+        async with (httpx2.AsyncClient() as web_client,
+                    httpx2.AsyncClient(base_url='http://langfuse', transport=httpx2.MockTransport(export)) as trace_client,
+                    tracing.startup(client=trace_client)):
+            with pytest.raises(asyncio.CancelledError):
+                await ResearchAgent(FunctionModel(model), Firecrawl(web_client)).run('Public topic')
+        span = exported[0]['resourceSpans'][0]['scopeSpans'][0]['spans'][0]
+        attrs = {a['key']: a['value'] for a in span['attributes']}
+        assert attrs['agent.status']['stringValue'] == 'cancelled'
+
+    asyncio.run(exercise())
+
+
+def test_empty_successful_search_is_not_reported_as_a_failure() -> None:
+    def web(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={'success': True, 'data': {}})
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
+        if not results:
+            return ModelResponse(parts=[ToolCallPart('search', {'queries': ['narrow public topic']})])
+        content = results[-1].content
+        assert isinstance(content, dict)
+        assert content.get('sources') == []
+        assert content.get('failed_queries') == 0
+        assert 'error' not in content
+        return ModelResponse(parts=[TextPart('No matching sources were found.')])
+
+    async def exercise() -> None:
+        async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
+            assert await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Research') == 'No matching sources were found.'
+
+    asyncio.run(exercise())
