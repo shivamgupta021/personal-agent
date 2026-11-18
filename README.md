@@ -13,7 +13,7 @@ uv run python manage.py research "Find Python's official explanation of asyncio.
 
 Use an available model slug from `models`. Run `uv run python manage.py login` if sign-in is required. Existing credentials remain in `.local/chatgpt`; no API-key fallback is used. `--state-dir` remains available.
 
-Each research command starts fresh conversation history and consumes subscription usage. Firecrawl defaults to `http://127.0.0.1:3002`; override it with `FIRECRAWL_BASE_URL`. Set `FIRECRAWL_API_KEY` if your installation requires one. Environment variables are read by Django settings; `.env` files are not loaded automatically.
+Each research command starts fresh conversation history and consumes subscription usage. Django automatically loads `.env` from the project root, regardless of the working directory. Copy `.env.example` to `.env` if needed and fill in your local configuration. Existing shell environment variables take precedence. The `.env` file is ignored by Git. Firecrawl defaults to `http://127.0.0.1:3002`; override it with `FIRECRAWL_BASE_URL`. Set `FIRECRAWL_API_KEY` if your installation requires one.
 
 ## Layout
 
@@ -47,7 +47,7 @@ Configure both `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` from your project
 
 `CoreConfig.ready()` configures Pydantic AI instrumentation globally using `Agent.instrument_all(InstrumentationSettings(...))`. Automatic instrumentation creates run, model, and tool spans with timing, usage, parent/child relationships, and error types. Prompts, completions, tool arguments/results, binary content, model request parameters, and exception messages are excluded by the instrumentation settings. Tests inspect the SDK's actual serialized OTLP payload for these exclusions.
 
-A standard OpenTelemetry OTLP/HTTP protobuf exporter sends the spans to Langfuse. We do not manually construct spans, record start/status fields, or maintain per-run tracing context. The command boundary flushes pending spans on completion. Live project ingestion still needs project keys and has not been verified.
+A standard OpenTelemetry OTLP/HTTP protobuf exporter sends the spans to Langfuse. We do not manually construct spans, record start/status fields, or maintain per-run tracing context. The command boundary flushes pending spans on completion. Live ingestion was verified on 18 November 2026 using a real subscription-backed research run and read-back through the Langfuse observations endpoint: one agent, three model generations with token usage, and two tool observations with correct parent relationships. Message structure and tool schemas remain visible, while prompt/answer text and tool arguments/results are excluded.
 
 Prompts remain version-controlled in `research/prompts.py`; Langfuse prompt management is not enabled. Reference: [Pydantic AI–Langfuse integration](https://langfuse.com/integrations/frameworks/pydantic-ai). We use the global configuration supported by the installed Pydantic AI version rather than the older per-agent `instrument=True` constructor example.
 
