@@ -652,6 +652,7 @@ name = "personal-agent"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpx2" },
     { name = "openai" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
 ]
@@ -664,6 +665,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx2", specifier = "==2.16.2" },
     { name = "openai", specifier = "==3.52.0" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = "==2.69.0" },
 ]

@@ -1,6 +1,6 @@
 # Personal grievance assistant MVP
 
-Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary for milestone 1 and requested implementation of that milestone. Published as GitHub issue #1 in shivamgupta021/personal-agent with label `ready-for-agent`. This spec does not authorize skipping the agreed learning checkpoints.
+Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary and later approved milestone 2 as a real terminal research agent using Pydantic AI and local Firecrawl, with metadata-only tracing. Published as GitHub issue #1 in shivamgupta021/personal-agent with label `ready-for-agent`. This spec does not authorize skipping the agreed learning checkpoints.
 
 ## Problem Statement
 
@@ -114,6 +114,10 @@ The root project glossary supplies the domain vocabulary. The design interview i
 
 The user confirms both prior success with ChatGPT subscription access and an existing local Firecrawl installation. Their project-specific integration remains to be exercised, without revisiting those choices. A previous read-only Docker inspection was denied socket access; this does not show that Firecrawl is absent.
 
-This spec is a synthesis, not an implemented feature. The first deliverable remains a small model/tool-loop learning example. Producing a complete spec does not remove the requirement to review milestones together.
+This spec describes the full product, not a claim that every feature is implemented. The handwritten learning loop is complete. The user brought local Firecrawl forward into milestone 2 to build a real terminal research agent rather than another synthetic example. Producing a complete spec does not remove the requirement to review milestones together.
 
 The private GitHub repository shivamgupta021/personal-agent is the configured issue tracker. This spec is published as issue #1; milestone 2 is tracked in issue #2. Tracker and triage conventions live in docs/agents/. Milestone 1 is implemented; subsequent milestones remain subject to the learning checkpoints.
+
+## Milestone 2 scope update — 18 November 2026
+
+The user approved public-web terminal research as the next usable vertical slice: one Pydantic AI agent, existing ChatGPT subscription authentication, local Firecrawl search and page reading, sourced answers, bounded execution, visible tool steps, and optional metadata-only Langfuse export. Preserve the handwritten lesson. Public-run tests and outbound telemetry exclusion checks are approved; code review baseline is `7c5996f`. General public-topic research is allowed in this standalone milestone; company-only research and enforced separation of private case facts remain requirements for the later grievance workflow. No Telegram, persistent case state, drafts, or external actions are included.
