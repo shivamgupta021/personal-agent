@@ -1,6 +1,6 @@
 # Initial approach — design interview
 
-Status: the user requested implementation and confirmed the milestone-1 testing boundary. Milestone 1 is implemented; subsequent milestones await the agreed learning checkpoint. Updated 17 November 2026.
+Status: historical design interview. Milestones 1 and 2 have been completed; the handwritten demo was subsequently removed. The current implementation and remaining work are tracked in `docs/specs/grievance-assistant-mvp.md` and GitHub issue #1. The historical notes below describe decisions at the time, not the current directory layout or integration status. Updated 18 November 2026.
 
 ## Confirmed context
 

@@ -1,6 +1,6 @@
 # Personal grievance assistant MVP
 
-Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary and later approved milestone 2 as a real terminal research agent using Pydantic AI and local Firecrawl, with metadata-only tracing. Published as GitHub issue #1 in shivamgupta021/personal-agent with label `ready-for-agent`. This spec does not authorize skipping the agreed learning checkpoints.
+Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary and later approved milestone 2 as a real terminal research agent using Pydantic AI and local Firecrawl, with metadata-only tracing. Published as GitHub issue #1 in shivamgupta021/personal-agent; it is the umbrella spec, not a single implementation ticket. This spec does not authorize skipping the agreed learning checkpoints.
 
 ## Problem Statement
 
@@ -64,12 +64,12 @@ Build this in small learning milestones: inspect a minimal model/tool loop first
 
 ## Implementation Decisions
 
-- **Code organization:** Use class-based, object-oriented Python for core behavior, as requested after milestone 1. Prefer focused responsibilities, composition and constructor-injected dependencies. Keep only thin entry points and small private stateless utilities as standalone functions.
+- **Code organization:** Use class-based, object-oriented Python for core behavior, as requested after milestone 1. Prefer focused responsibilities, composition and constructor-injected dependencies. Use root-level `manage.py`, `config/` and Django apps, singular `service.py`, module-scope imports, app constants and separate prompts. Keep only thin entry points and small private stateless utilities as standalone functions.
 - **Runtime and authentication:** Python and Django on the user's M4 Pro MacBook Pro. Use direct ChatGPT subscription sign-in. API-credit activation is not a prerequisite. Do not add automatic paid fallback or recharge. Integrating and checking authentication is implementation work, not a reason to reopen the chosen access route.
-- **Agent architecture:** One Pydantic AI agent with narrow Python tools. Begin with a minimal inspectable loop using synthetic data and a harmless tool before adopting the framework. Specialist agents are deferred.
+- **Agent architecture:** One Pydantic AI agent with narrow Python tools. The handwritten learning loop was completed and then removed at the user's request. The current real research loop uses Pydantic AI. Do not reintroduce synthetic application commands. Specialist orchestration is deferred; add capabilities through focused services and narrow tools.
 - **Application responsibilities:** Keep Telegram transport, application-level turn handling, model/tool execution, case services, research integration, and observability distinct. Django owns durable application records; model conversation history supplies context; traces explain execution. Neither a model answer nor a trace is authoritative evidence of a case outcome.
 - **Telegram boundary:** Use local long polling initially. Restrict access to the owner and private chat. Persist enough delivery identity to avoid duplicate application changes. Maintain one active grievance case per conversation, support listing and switching, and ask when a reference is ambiguous.
-- **Persistence:** Preserve conversations, grievance cases, supplied facts, research sources, draft versions, company replies, and user-reported sent/outcome information. Persist across restarts. Physical schema and database selection remain implementation details, not additional product scope.
+- **Persistence:** Preserve conversations, grievance cases, supplied facts, research sources, draft versions, company replies, and user-reported sent/outcome information. Persist across restarts. Use a dedicated local PostgreSQL database on the existing server when persistence is introduced, with Django migrations and an isolated test database. Do not reuse another application's tables. Conversation context, explicit preferences and grievance records have distinct responsibilities.
 - **Case domain:** Refund requests are the first case type within grievance redressal. Preserve the distinction between a complaint draft, a user-reported sent complaint, a resolved case, and closure without resolution. Generating a draft or receiving a company reply must not automatically mark resolution.
 - **Intake and corrections:** Accept typed/pasted text only. Ask for missing facts that affect the draft. An explicit material correction updates the facts used for future work and marks affected prior drafts outdated. Preserve those versions. Clarify conflicting statements without an explicit correction.
 - **Research integration:** Reuse the user's existing local Firecrawl service for search and page retrieval. Verify its endpoint and behavior during implementation; no new installation is planned by default. Scope research to company-published policies, complaint procedures, and support contacts. Check that sources are genuinely official rather than relying solely on search ranking or a query's domain restriction.
@@ -84,7 +84,7 @@ Build this in small learning milestones: inspect a minimal model/tool loop first
 
 ## Testing Decisions
 
-- **Current prior art:** The project contains a glossary, research, and design notes only. There is no application, existing test seam, test suite, or ADR to reuse. Upstream examples informed the design, but they are not tests of this application.
+- **Current implementation:** The real public ResearchAgent.run boundary is covered with controlled model/HTTP responses, execution limits, failure recovery and fresh history. Native tracing tests inspect serialized OTLP payloads. At the 18 November checkpoint, 21 tests, strict mypy and Django checks pass. Live subscription/Firecrawl research has succeeded; live Langfuse project ingestion still needs keys and verification. Extend these boundaries as durable application state is added.
 - **Primary test boundary:** Submit a normalized owner message or user action through the application-level turn handler and observe the user-facing reply and durable case state. For milestone 1, the user confirmed message input, controlled model responses, visible tool steps, final answer, and stopping limits, with a separate live subscription smoke check. Persistence is added in later milestones. Exercise the agent, tool services, and persistence together when available. This keeps the main suite independent of Telegram transport objects, prompt wording, internal helper calls, and future module rearrangements.
 - **External dependencies at that boundary:** Substitute controlled model and research responses for repeatable application tests, while using an isolated real test database. Simulate failures and ambiguous results through those dependencies. Do not mock the case services or persistence merely to assert that internal methods were called.
 - **Good tests:** Check external behavior: correct case association, preserved/corrected facts, appropriate clarification, draft version visibility, saved state after restart, honest failure reporting, deletion, and absence of unauthorized actions. Assert meaningful outcomes rather than exact prose, particular prompts, or incidental tool order.
@@ -112,9 +112,9 @@ Build this in small learning milestones: inspect a minimal model/tool loop first
 
 The root project glossary supplies the domain vocabulary. The design interview is the source of agreed scope and supersedes earlier research recommendations, notably the earlier API-credit-first suggestion and the initial supplied-facts-only research boundary.
 
-The user confirms both prior success with ChatGPT subscription access and an existing local Firecrawl installation. Their project-specific integration remains to be exercised, without revisiting those choices. A previous read-only Docker inspection was denied socket access; this does not show that Firecrawl is absent.
+Project-specific ChatGPT subscription access and local Firecrawl integration have been exercised successfully. Reuse them. Langfuse is running locally, but live project ingestion remains unverified until project keys are configured.
 
-This spec describes the full product, not a claim that every feature is implemented. The handwritten learning loop is complete. The user brought local Firecrawl forward into milestone 2 to build a real terminal research agent rather than another synthetic example. Producing a complete spec does not remove the requirement to review milestones together.
+This spec describes the full product, not a claim that every feature is implemented. The handwritten learning loop was completed and subsequently removed; only the real research loop remains in application code. The user brought local Firecrawl forward into milestone 2 to build a real terminal research agent rather than another synthetic example. Producing a complete spec does not remove the requirement to review milestones together.
 
 The private GitHub repository shivamgupta021/personal-agent is the configured issue tracker. This spec is published as issue #1; milestone 2 is tracked in issue #2. Tracker and triage conventions live in docs/agents/. Milestone 1 is implemented; subsequent milestones remain subject to the learning checkpoints.
 
@@ -123,3 +123,25 @@ The private GitHub repository shivamgupta021/personal-agent is the configured is
 The user approved public-web terminal research as the next usable vertical slice: one Pydantic AI agent, existing ChatGPT subscription authentication, local Firecrawl search and page reading, sourced answers, bounded execution, visible tool steps, and optional metadata-only Langfuse export. The user subsequently requested removal of the handwritten lesson and synthetic commands; the real research agent is the sole application loop. Public-run tests and outbound telemetry exclusion checks are approved; code review baseline is `7c5996f`. General public-topic research is allowed in this standalone milestone; company-only research and enforced separation of private case facts remain requirements for the later grievance workflow. No Telegram, persistent case state, drafts, or external actions are included.
 
 During manual review, the user requested Django app organization and native Pydantic AI–Langfuse instrumentation. Django now owns settings, logging, startup, and management commands; persistent case models and web endpoints remain out of scope. Global instrumentation replaces the manual trace exporter, with content capture disabled and serialized-payload privacy tests.
+
+
+## Provisional delivery breakdown — 18 November 2026
+
+- Milestone 1: completed as a learning exercise before GitHub tickets existed; synthetic application code was removed in `2363cc0`.
+- [#2](https://github.com/shivamgupta021/personal-agent/issues/2): completed real terminal research, subsequently simplified into root-level Django apps with shared native tracing. Current code checkpoint: `5d2e0cb`.
+- The closed research ticket means implementation is complete; it does not claim live Langfuse ingestion has been verified.
+
+| Issue | Deliverable | Dependencies |
+| --- | --- | --- |
+| [#3](https://github.com/shivamgupta021/personal-agent/issues/3) | Verify live native Langfuse ingestion | Independent configuration check |
+| [#4](https://github.com/shivamgupta021/personal-agent/issues/4) | Milestone 3: owner-only Telegram with persistent explicit memory | #2 |
+| [#5](https://github.com/shivamgupta021/personal-agent/issues/5) | Milestone 4: persistent grievance cases and factual intake | #4 |
+| [#6](https://github.com/shivamgupta021/personal-agent/issues/6) | Milestone 5: factual complaint drafts with immutable versions | #5 |
+| [#7](https://github.com/shivamgupta021/personal-agent/issues/7) | Milestone 6: private case research with official evidence and grounded drafts | #6 |
+| [#8](https://github.com/shivamgupta021/personal-agent/issues/8) | Milestone 7: manual sent status, company replies and follow-up drafts | #7 |
+| [#9](https://github.com/shivamgupta021/personal-agent/issues/9) | Milestone 8: complete local case deletion and context cleanup | #8 |
+| [#10](https://github.com/shivamgupta021/personal-agent/issues/10) | Milestone 9: integrated grievance evaluations and MVP acceptance | #9, #3 |
+
+The user rejected publishing this breakdown before reviewing its granularity and blockers. Build tickets are now needs-triage and are not authorized as the implementation frontier. The [reviewed grievance MVP decision map](https://github.com/shivamgupta021/personal-agent/issues/11) owns unresolved planning decisions. Use to-spec and to-tickets checkpoints before republishing an approved sequence. Implementation is paused while the user learns Langfuse. The separate live Langfuse ingestion check has now succeeded; evidence is recorded in README.
+
+Focused model evaluations accompany drafting/research milestones; #10 integrates the suite rather than introducing evaluation for the first time. The finished MVP remains refund-first grievance assistance with manual external actions. Langfuse prompt management, general multi-agent orchestration, bookings and hosting are deferred.
