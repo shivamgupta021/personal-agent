@@ -17,6 +17,7 @@ INSTALLED_APPS = [
     'core.apps.CoreConfig',
     'subscriptions.apps.SubscriptionsConfig',
     'research.apps.ResearchConfig',
+    'telegram_bot.apps.TelegramBotConfig',
 ]
 ROOT_URLCONF = 'config.urls'
 WSGI_APPLICATION = 'config.wsgi.application'
@@ -28,6 +29,10 @@ TIME_ZONE = 'Asia/Kolkata'
 
 SIMPLE_QUERY_MODEL = os.getenv('SIMPLE_QUERY_MODEL', DEFAULT_MODEL)
 COMPLEX_QUERY_MODEL = os.getenv('COMPLEX_QUERY_MODEL', DEFAULT_MODEL)
+
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_OWNER_ID = os.getenv('TELEGRAM_OWNER_ID', '')
+TELEGRAM_STATE_DIR = BASE_DIR / '.local' / 'telegram'
 
 SUBSCRIPTION_STATE_DIR = BASE_DIR / '.local' / 'chatgpt'
 FIRECRAWL_BASE_URL = os.getenv('FIRECRAWL_BASE_URL', 'http://127.0.0.1:3002')
@@ -45,7 +50,7 @@ LOGGING = {
     'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'console'}},
     'loggers': {
         name: {'handlers': ['console'], 'level': 'INFO', 'propagate': False}
-        for name in ('core', 'research', 'subscriptions')
+        for name in ('core', 'research', 'subscriptions', 'telegram_bot')
     },
 }
 os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
