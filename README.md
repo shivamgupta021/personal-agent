@@ -185,3 +185,10 @@ or polling conflicts stop the command; transient network failures wait and resum
 Transport regression tests use controlled HTTP/model boundaries. The Langfuse research
 experiments remain the model-quality workflow; Telegram introduces no new research prompt.
 The live round trip requires your bot token and owner ID and is separate from those tests.
+
+Live transport verification on 18 November 2026: an owner message reached the real research
+service and Telegram accepted the reply. Langfuse trace
+`daa396856f5813404569ea7be406760a` recorded 15.669 seconds, three model generations,
+one search (five sources, zero failed queries), and one 2,342-character page read.
+Content capture was disabled for that run. This verifies delivery through the API and trace
+ingestion; the owner's visual check of the answer/citation is separate.
