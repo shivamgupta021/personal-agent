@@ -125,7 +125,7 @@ def test_research_exports_only_metadata_and_survives_trace_failure(trace_status:
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize('failure', ['http', 'malformed', 'oversized', 'private_url', 'blocked_page'])
+@pytest.mark.parametrize('failure', ['http', 'malformed', 'oversized', 'private_url', 'blocked_page', 'malformed_url'])
 def test_web_failures_are_returned_to_the_model_without_raw_errors(failure: str) -> None:
     requests: list[str] = []
 
@@ -144,6 +144,8 @@ def test_web_failures_are_returned_to_the_model_without_raw_errors(failure: str)
         results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
         if not results:
             url = 'http://127.0.0.1/secrets' if failure == 'private_url' else 'https://example.com/policy'
+            if failure == 'malformed_url':
+                url = 'https://[invalid]/'
             return ModelResponse(parts=[ToolCallPart('read_page', {'url': url})])
         assert 'error' in str(results[-1].content)
         assert 'secret-server-error' not in str(results[-1].content)
@@ -153,7 +155,7 @@ def test_web_failures_are_returned_to_the_model_without_raw_errors(failure: str)
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
             answer = await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Find the policy')
             assert answer == 'I could not verify this page.'
-        if failure == 'private_url':
+        if failure in {'private_url', 'malformed_url'}:
             assert requests == []
 
     asyncio.run(exercise())
@@ -180,3 +182,17 @@ def test_agent_can_read_later_sections_of_a_long_page() -> None:
             assert await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Find deadlines') == 'Found the deadline section.'
 
     asyncio.run(exercise())
+
+
+def test_rejected_credential_url_is_not_printed(capsys: pytest.CaptureFixture[str]) -> None:
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
+            return ModelResponse(parts=[TextPart('Please use a public URL without credentials.')])
+        return ModelResponse(parts=[ToolCallPart('read_page', {'url': 'https://user:secret-password@example.com/'})])
+
+    async def exercise() -> None:
+        async with httpx2.AsyncClient() as client:
+            await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Read a page')
+
+    asyncio.run(exercise())
+    assert 'secret-password' not in capsys.readouterr().out

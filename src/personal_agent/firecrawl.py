@@ -15,7 +15,7 @@ class Firecrawl:
 
     async def search(self, query: Annotated[str, Field(min_length=1, max_length=500)]) -> dict[str, Any]:
         """Search the public web. Use public topics, never private personal details."""
-        print(f'[tool] search {query!r}', flush=True)
+        print('[tool] search', flush=True)
         data = await self._post('/v2/search', {'query': query, 'limit': 5})
         if 'error' in data:
             return data
@@ -35,9 +35,12 @@ class Firecrawl:
     async def read_page(self, url: Annotated[str, Field(min_length=1, max_length=2000)],
                         offset: Annotated[int, Field(ge=0, le=2_000_000)] = 0) -> dict[str, Any]:
         """Read a public HTTP(S) page. Use next_offset to continue long pages; cite URL and retrieval date."""
-        print(f'[tool] read_page {url!r}', flush=True)
-        parsed = urlsplit(url)
-        host = parsed.hostname or ''
+        print('[tool] read_page', flush=True)
+        try:
+            parsed = urlsplit(url)
+            host = parsed.hostname or ''
+        except ValueError:
+            return {'error': 'public_url_required'}
         if (parsed.scheme not in {'http', 'https'} or not host or parsed.username
                 or parsed.password or '.' not in host or host.endswith(('.local', '.localhost'))):
             return {'error': 'public_url_required'}

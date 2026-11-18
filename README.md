@@ -16,7 +16,7 @@ Use an available model slug from `models`. If you have not signed in, run `PYTHO
 
 Default Firecrawl address: `http://127.0.0.1:3002`. Override it with `FIRECRAWL_BASE_URL`; set `FIRECRAWL_API_KEY` only if your service requires it. `.env.example` lists settings. The app reads environment variables; it does not automatically load `.env` files.
 
-Use public topics for this milestone. Queries and page URLs appear in your terminal; the question and retrieved content go to the model, and searches go through Firecrawl's configured search backend. Instructions ask the model to exclude personal details, but this is not an enforced personal-data redactor or a real grievance intake system.
+Use public topics for this milestone. Terminal progress shows tool names and result sizes; the question and retrieved content go to the model, and searches go through Firecrawl's configured search backend. Instructions ask the model to exclude personal details, but this is not an enforced personal-data redactor or a real grievance intake system.
 
 ## Understand and review the flow
 
