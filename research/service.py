@@ -13,11 +13,17 @@ class ResearchService:
     def __init__(self, subscription: SubscriptionService) -> None:
         self.subscription = subscription
 
-    async def run(self, message: str, model_name: str = DEFAULT_MODEL) -> str:
+    async def run(self, message: str, model_name: str = DEFAULT_MODEL, *, use_query_planners: bool = False) -> str:
         headers = {'Authorization': f'Bearer {settings.FIRECRAWL_API_KEY}'} if settings.FIRECRAWL_API_KEY else {}
+        names = {'main': model_name}
+        if use_query_planners:
+            names.update(simple=settings.SIMPLE_QUERY_MODEL, complex=settings.COMPLEX_QUERY_MODEL)
         async with (
-            self.subscription.model(model_name) as model,
+            self.subscription.models(names) as models,
             httpx2.AsyncClient(base_url=settings.FIRECRAWL_BASE_URL,
                               headers=headers, follow_redirects=False) as client,
         ):
-            return await ResearchAgent(model, Firecrawl(client)).run(message)
+            return await ResearchAgent(
+                models['main'], Firecrawl(client), models.get('simple'), models.get('complex'),
+                use_query_planners=use_query_planners,
+            ).run(message)

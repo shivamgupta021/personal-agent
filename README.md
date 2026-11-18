@@ -47,7 +47,7 @@ Configure both `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` from your project
 
 `CoreConfig.ready()` configures Pydantic AI instrumentation globally using `Agent.instrument_all(InstrumentationSettings(...))`. Automatic instrumentation creates run, model, and tool spans with timing, usage, parent/child relationships, and error types. By default, prompts, completions, tool arguments/results, and exception messages are excluded. Set `LANGFUSE_CAPTURE_CONTENT=true` in `.env` to record text content for local debugging: prompts, answers, tool inputs/results, and exception details may then be stored in Langfuse. Binary content and model request parameters remain excluded. Tests inspect the SDK's actual serialized OTLP payload with content capture both enabled and disabled.
 
-A standard OpenTelemetry OTLP/HTTP protobuf exporter sends the spans to Langfuse. Framework instrumentation owns agent/model/tool spans. Content capture follows `LANGFUSE_CAPTURE_CONTENT`. The command boundary flushes pending spans on completion. Live ingestion was verified on 18 November 2026 using a real subscription-backed research run and read-back through the Langfuse observations endpoint: one agent, three model generations with token usage, and two tool observations with correct parent relationships. With content capture disabled, message structure and tool schemas remain visible, while prompt/answer text and tool arguments/results are excluded. After changing the flag, run a new management command; existing traces cannot recover omitted content.
+A standard OpenTelemetry OTLP/HTTP protobuf exporter sends the spans to Langfuse. Framework instrumentation owns agent/model/tool spans. Explicit `firecrawl.search` and `firecrawl.scrape` retrieval spans record each service request, including requests made inside delegated tools; content follows `LANGFUSE_CAPTURE_CONTENT`. The command boundary flushes pending spans on completion. Live ingestion was verified on 18 November 2026 using a real subscription-backed research run and read-back through the Langfuse observations endpoint: one agent, three model generations with token usage, and two tool observations with correct parent relationships. With content capture disabled, message structure and tool schemas remain visible, while prompt/answer text and tool arguments/results are excluded. After changing the flag, run a new management command; existing traces cannot recover omitted content.
 
 Prompts remain version-controlled in `research/prompts.py`; Langfuse prompt management is not enabled. Reference: [Pydantic AI–Langfuse integration](https://langfuse.com/integrations/frameworks/pydantic-ai). We use the global configuration supported by the installed Pydantic AI version rather than the older per-agent `instrument=True` constructor example.
 
@@ -60,6 +60,31 @@ uv run pytest -q
 ```
 
 Controlled tests exercise real application code with substituted model/HTTP boundaries. They don't consume subscription usage or establish model research quality. Live subscription plus local Firecrawl research has also been exercised separately.
+
+## Parked query-planner experiment (disabled by default)
+
+`uv run python manage.py plan_queries "Find official Python asyncio.timeout documentation" --mode simple`
+returns a validated JSON plan without searching or scraping. It uses GPT-6.2 Sol by default
+and creates a `simple_query_planner` or `complex_query_planner` trace with the same Langfuse configuration.
+
+The planner has separate instructions in `research/planning/prompts.py` and a bounded
+`SearchPlan` output. Simple mode requires one query; `--mode complex` requires two or three complementary queries. Query privacy instructions are advisory,
+not an enforced redaction layer. Normal `research` runs expose only `search` and `read_page`: the main
+agent generates queries directly. Planner code and tests are preserved for later use.
+
+Only `research --experimental-query-planners` exposes `search_simple`, `search_complex`, and `read_page`
+to the main agent. The main agent chooses a planning tool and passes a research question.
+That tool invokes its planner and executes the validated queries directly with Firecrawl,
+returning the queries and sources together. The main agent then selects pages and answers.
+
+Planner requests count toward the overall model-request budget. Each planner also has a
+local request allowance and timeout. Both use GPT-6.2 Sol by default; configure
+`SIMPLE_QUERY_MODEL` and `COMPLEX_QUERY_MODEL` in `.env` independently. The research command's
+`--model` selects the main model only. One subscription client/lock is shared for the run.
+Different provider integrations and a dedicated routing model are not implemented.
+
+Native tracing nests the planner run under its selected search tool. Inspect that child
+run for the planner prompt/output, then the parent tool output for actual search results.
 
 ## Retrieval behavior
 

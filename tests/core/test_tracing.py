@@ -41,7 +41,7 @@ class CaptureSession(Session):
 @pytest.fixture
 def native_tracing(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[CaptureSession]:
     session = CaptureSession()
-    monkeypatch.setattr(settings, "LANGFUSE_CAPTURE_CONTENT", getattr(request, "param", False))
+    monkeypatch.setattr(settings, 'LANGFUSE_CAPTURE_CONTENT', getattr(request, 'param', False))
     tracing.configure(OTLPSpanExporter(endpoint='http://langfuse/api/public/otel/v1/traces', session=session))
     try:
         yield session
@@ -49,20 +49,24 @@ def native_tracing(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         tracing.shutdown()
 
 
-@pytest.mark.parametrize("native_tracing", [False, True], indirect=True)
-def test_native_spans_capture_tools_and_usage_with_configured_content(native_tracing: CaptureSession, request: pytest.FixtureRequest) -> None:
+@pytest.mark.parametrize('native_tracing', [False, True], indirect=True)
+def test_native_spans_capture_tools_and_usage_with_configured_content(
+    native_tracing: CaptureSession, request: pytest.FixtureRequest,
+) -> None:
     def web(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json={'success': True, 'data': {'web': [
             {'url': 'https://example.com/private-url', 'description': 'private-page'}]}})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if info.output_tools:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'queries': ['private-query']})])
         if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
             return ModelResponse(parts=[TextPart('private-answer')])
-        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['private-query']})])
+        return ModelResponse(parts=[ToolCallPart('search_simple', {'question': 'private-query'})])
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            assert await ResearchAgent(FunctionModel(model, model_name='controlled-model'), Firecrawl(client)).run(
+            assert await ResearchAgent(FunctionModel(model, model_name='controlled-model'), Firecrawl(client), use_query_planners=True).run(
                 'private-prompt') == 'private-answer'
 
     asyncio.run(exercise())
@@ -71,11 +75,12 @@ def test_native_spans_capture_tools_and_usage_with_configured_content(native_tra
     for secret in [b'private-prompt', b'private-answer', b'private-query', b'private-page', b'private-url']:
         assert (secret in bodies) is request.node.callspec.params['native_tracing']
     spans = native_tracing.spans()
-    assert len(spans) >= 4  # agent run, two model calls, one tool call
+    assert len(spans) >= 6  # Parent run, delegated planner, three model calls, search tool.
+    assert any('simple_query_planner' in span.name for span in spans)
+    search = next(span for span in spans if span.name == 'firecrawl.search')
+    parent = next(span for span in spans if span.span_id == search.parent_span_id)
+    assert 'search_simple' in parent.name
     assert any('search' in span.name for span in spans)
-    retrieval = next(span for span in spans if span.name == 'firecrawl.search')
-    parent = next(span for span in spans if span.span_id == retrieval.parent_span_id)
-    assert 'search' in parent.name
     assert any(a.key == 'gen_ai.usage.input_tokens' for span in spans for a in span.attributes)
     assert len({span.trace_id for span in spans}) == 1
     assert any(span.parent_span_id for span in spans)
@@ -88,7 +93,7 @@ def test_native_error_spans_do_not_export_exception_message(native_tracing: Capt
     async def exercise() -> None:
         async with httpx2.AsyncClient() as client:
             with pytest.raises(ValueError, match='private-provider-error'):
-                await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('private-failed-prompt')
+                await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('private-failed-prompt')
 
     asyncio.run(exercise())
     tracing.flush()
@@ -106,7 +111,7 @@ def test_export_failure_does_not_discard_answer(native_tracing: CaptureSession) 
 
     async def exercise() -> None:
         async with httpx2.AsyncClient() as client:
-            assert await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('A question') == 'Still usable'
+            assert await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('A question') == 'Still usable'
 
     asyncio.run(exercise())
     tracing.flush()
@@ -120,7 +125,7 @@ def test_native_traces_isolate_concurrent_runs(native_tracing: CaptureSession) -
 
     async def exercise() -> None:
         async with httpx2.AsyncClient() as client:
-            agent = ResearchAgent(FunctionModel(model), Firecrawl(client))
+            agent = ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True)
             answers = await asyncio.gather(agent.run('First'), agent.run('Second'))
             assert tuple(answers) == ('Answer', 'Answer')
 
@@ -138,7 +143,7 @@ def test_native_tracing_preserves_cancellation_without_prompt_content(native_tra
     async def exercise() -> None:
         async with httpx2.AsyncClient() as client:
             with pytest.raises(asyncio.CancelledError):
-                await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('private-cancelled-prompt')
+                await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('private-cancelled-prompt')
 
     asyncio.run(exercise())
     tracing.flush()
