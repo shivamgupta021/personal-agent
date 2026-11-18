@@ -251,3 +251,11 @@ recall your code word” after deletion. Trace deletion is asynchronous and must
 checked separately; an accepted request alone is not proof of remote erasure.
 The exact phrase “Delete this entire conversation” also works without a model call,
 including when saved context is already over budget or model access is unavailable.
+
+Live acceptance completed on 18 November 2026: test messages were sent from the
+owner's Telegram Web session. The bot recalled Python and Ruby, then recalled the
+same pair after its process was stopped and restarted without restating the names.
+Post-restart trace: `7640a760d7b4d3c90ba7784c4159b137`.
+The separate synthetic deletion trace `be7eadee671e41d3708304b83be8214f`
+subsequently returned zero observations from Langfuse's observations API, confirming
+that the previously pending asynchronous cleanup had completed at verification time.
