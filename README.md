@@ -259,3 +259,31 @@ Post-restart trace: `7640a760d7b4d3c90ba7784c4159b137`.
 The separate synthetic deletion trace `be7eadee671e41d3708304b83be8214f`
 subsequently returned zero observations from Langfuse's observations API, confirming
 that the previously pending asynchronous cleanup had completed at verification time.
+
+### Automatic context compaction (milestone #24)
+
+After applying migrations, Telegram automatically summarizes older context when the
+assembled request reaches 32,000 bytes. It retains recent complete exchanges using the
+matching Pydantic AI harness, then checks the 48,000-byte hard limit again. There is no
+summary call on ordinary short turns. The earlier #23 “no compaction” limitation above
+is superseded by this milestone.
+
+Original messages remain in the local archive. Active context, originals, and summary
+source references commit together only after a successful turn. A failed summary keeps
+the previous context; the request continues only if that context fits the hard limit.
+Whole-conversation deletion includes summaries. Retrieval from the archive is not yet
+available in replies.
+
+Inspect `compact_messages` → `summarizing_compaction run` → model generation in
+Langfuse. The generation contains the summary prompt/output and usage; the surrounding
+framework span provides compaction metadata. Include those generations when comparing
+latency and token totals.
+
+```sh
+uv run python manage.py evaluate_conversation --compaction
+uv run python manage.py evaluate_conversation --compaction --full-history
+```
+
+These use the same hosted synthetic dataset and distinct experiment variants. The
+full-history baseline still enforces the hard request budget. A baseline that exceeds
+that budget is a failed comparison, not evidence of speed or token savings.

@@ -62,3 +62,26 @@ These are project-specific deductions, not framework guarantees:
 3. Measure compaction fidelity, latency, and total tokens, including summarization. Select conservative configurable budgets using evidence rather than arbitrary message counts.
 
 Acceptance research should compare repeated compactions against full-history answers using synthetic cases: corrected early facts, exact source references, huge tool results, pending tools, restart, case isolation, and deletion without resurrection. Measure accuracy, provenance, total tokens including summarization, and latency. The existing MVP spec is an input to reconcile during grilling, not authorization to settle these questions here.
+
+## Milestone #24 implementation evidence — 18 November 2026
+
+Installed and exercised `pydantic-ai-harness==0.69.0` with the existing
+`pydantic-ai-slim==2.69.0`. The public `SummarizingCompaction.before_model_request`
+capability handles tool-safe retention and anchored incremental summaries. Its nested
+summary agent uses the existing model connection, contributes to shared request/usage
+limits, and emits native agent/generation spans. No provider-native `/compact` API is
+required. The subscription route successfully generated summaries in a real run.
+
+Application policy wraps that capability: trigger at 32,000 serialized request bytes,
+retain at least 6,000 content bytes of recent messages (whole tool dependencies may
+expand this), and enforce the existing 48,000-byte hard guard after compaction.
+The summary call has its own hard input guard, a 45-second timeout, 1,500 output-token
+cap, no output retries, and at most two compaction attempts per turn. Tool evidence is
+not truncated before summarization. These conservative byte estimates are not exact
+provider token counts. An oversized protected tail fails visibly rather than losing facts.
+
+Original messages carry stable local archive identifiers. Successful turns atomically
+save the original-message archive, reduced active context, and summary snapshots with
+source identifiers; failed turns leave committed state unchanged. Whole-conversation
+deletion cascades to summary snapshots, and nested summary traces share the recorded
+turn trace for deletion. Archival recall remains milestone #25.

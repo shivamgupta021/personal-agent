@@ -879,6 +879,7 @@ dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic-ai-harness" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
     { name = "python-dotenv" },
 ]
@@ -901,6 +902,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = "==1.45.2" },
     { name = "opentelemetry-sdk", specifier = "==1.45.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
+    { name = "pydantic-ai-harness", specifier = "==0.69.0" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = "==2.69.0" },
     { name = "python-dotenv", specifier = "==1.2.4" },
 ]
@@ -1020,6 +1022,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b4/fc/1203d011145c98ddce3cd2f505bb54375ef8d43223053df6bfcf3c746f46/pydantic-2.14.3.tar.gz", hash = "sha256:1054f237f4d4733e5a30e1e2333bd33a2004ab9ab1510bd053a9a31bb48e232d", size = 925636, upload-time = "2026-11-05T09:17:04.686Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/72/b8/b864503789ef5c58597d2a7b4adbee62c26440ab1e682581fc6838df8947/pydantic-2.14.3-py3-none-any.whl", hash = "sha256:3f7b347782ab7e4cf4c798496ae3a82787d9f21ec12676a9c564355eeef8daa8", size = 494071, upload-time = "2026-11-05T09:17:02.426Z" },
+]
+
+[[package]]
+name = "pydantic-ai-harness"
+version = "0.69.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "genai-prices" },
+    { name = "httpx2" },
+    { name = "pydantic-ai-slim" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f6/82/82c63ace54235d82c87375316f2d5cb8c4b930dde05a55dc0ba20d4b5160/pydantic_ai_harness-0.69.0.tar.gz", hash = "sha256:fd7a0fad4ca6f53341484b013bf79dde53f3dae571b6b490d92c1d7d7cb5689b", size = 1692279, upload-time = "2026-11-17T01:53:00.902Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/c5/e5f49287b10467114394186a882caa51f0e232a4839a26aa32939b7b96fc/pydantic_ai_harness-0.69.0-py3-none-any.whl", hash = "sha256:5405801238468cb593d58a1cbed4ccba523576ba89af1d5ec6ad60f0148d33d4", size = 2049792, upload-time = "2026-11-17T01:52:47.61Z" },
 ]
 
 [[package]]
