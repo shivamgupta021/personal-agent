@@ -65,7 +65,7 @@ def test_forgetting_stops_old_context_and_requests_trace_cleanup(tmp_path: Path)
     def telegram(request: httpx2.Request) -> httpx2.Response:
         nonlocal turn
         if request.url.path.endswith('getUpdates'):
-            texts = ['My example code is violet.', 'Delete this entire conversation.', 'What was my example code?']
+            texts = ['My example code is violet.', 'Please erase our whole chat history.', 'What was my example code?']
             text = texts[turn]
             turn += 1
             return httpx2.Response(200, json={'ok': True, 'result': [{
@@ -76,7 +76,7 @@ def test_forgetting_stops_old_context_and_requests_trace_cleanup(tmp_path: Path)
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         from_context.append(str(messages))
-        if 'Delete this entire conversation.' in str(messages):
+        if 'Please erase our whole chat history.' in str(messages):
             return ModelResponse(parts=[ToolCallPart('forget_conversation', {})])
         return ModelResponse(parts=[TextPart('violet' if 'violet' in str(messages) else 'I do not know')])
 
