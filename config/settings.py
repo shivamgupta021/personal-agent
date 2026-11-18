@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env', override=False)
 
@@ -24,12 +25,14 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 USE_TZ = True
 TIME_ZONE = 'Asia/Kolkata'
 
+
 SUBSCRIPTION_STATE_DIR = BASE_DIR / '.local' / 'chatgpt'
 FIRECRAWL_BASE_URL = os.getenv('FIRECRAWL_BASE_URL', 'http://127.0.0.1:3002')
 FIRECRAWL_API_KEY = os.getenv('FIRECRAWL_API_KEY', '')
 LANGFUSE_BASE_URL = os.getenv('LANGFUSE_BASE_URL', 'http://127.0.0.1:3000')
 LANGFUSE_PUBLIC_KEY = os.getenv('LANGFUSE_PUBLIC_KEY', '')
 LANGFUSE_SECRET_KEY = os.getenv('LANGFUSE_SECRET_KEY', '')
+LANGFUSE_CAPTURE_CONTENT = os.getenv('LANGFUSE_CAPTURE_CONTENT', 'false').strip().lower() == 'true'
 LANGFUSE_TIMEOUT_SECONDS = 5.0
 
 LOGGING = {

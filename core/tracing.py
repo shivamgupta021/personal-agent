@@ -2,6 +2,12 @@
 
 import base64
 import logging
+import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
+
+from opentelemetry.trace import NoOpTracerProvider, Span, StatusCode
 
 from django.conf import settings
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -39,11 +45,33 @@ class Tracing:
         self._provider.add_span_processor(BatchSpanProcessor(exporter))
         Agent.instrument_all(InstrumentationSettings(
             tracer_provider=self._provider,
-            include_content=False,
+            include_content=settings.LANGFUSE_CAPTURE_CONTENT,
             include_binary_content=False,
             include_model_request_parameters=False,
         ))
-        logger.info('Native Pydantic AI tracing enabled; content capture disabled')
+        logger.info('Native Pydantic AI tracing enabled; content capture %s',
+                    'enabled' if settings.LANGFUSE_CAPTURE_CONTENT else 'disabled')
+
+    @contextmanager
+    def operation(self, name: str, inputs: dict[str, Any]) -> Iterator[Span]:
+        provider = self._provider or NoOpTracerProvider()
+        with provider.get_tracer('personal-agent.retrieval').start_as_current_span(
+            name, record_exception=False, set_status_on_exception=False,
+            attributes={'langfuse.observation.type': 'retriever'},
+        ) as span:
+            if settings.LANGFUSE_CAPTURE_CONTENT:
+                span.set_attribute('langfuse.observation.input', json.dumps(inputs))
+            try:
+                yield span
+            except BaseException:
+                span.set_status(StatusCode.ERROR)
+                raise
+
+    def record_output(self, span: Span, output: dict[str, Any]) -> None:
+        if settings.LANGFUSE_CAPTURE_CONTENT:
+            span.set_attribute('langfuse.observation.output', json.dumps(output))
+        if 'error' in output:
+            span.set_status(StatusCode.ERROR)
 
     def flush(self) -> None:
         if self._provider is not None:

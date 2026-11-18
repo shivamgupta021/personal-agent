@@ -28,7 +28,7 @@ class SubscriptionService:
                     for model in catalog.get('models', []) if model.get('visibility') == 'list']
 
     @asynccontextmanager
-    async def model(self, name: str) -> AsyncIterator[OpenAIResponsesModel]:
+    async def model(self, name: str = constants.DEFAULT_MODEL) -> AsyncIterator[OpenAIResponsesModel]:
         async with self._client() as client:
             yield OpenAIResponsesModel(
                 name, provider=OpenAIChatGPTProvider(openai_client=client),
