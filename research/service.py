@@ -1,10 +1,12 @@
 """Compose the real research dependencies for one application request."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Awaitable, Callable
 
 import httpx2
 from django.conf import settings
 from pydantic_ai.models import Model
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.run import AgentRunResult
 
 from research.agent import ResearchAgent
 from research.tools.firecrawl import Firecrawl
@@ -39,3 +41,13 @@ class ResearchService:
             models['main'], firecrawl, models.get('simple'), models.get('complex'),
             use_query_planners=use_query_planners,
         ).run(message)
+
+    async def run_turn(self, message: str, history: list[ModelMessage],
+                       forget: Callable[[], Awaitable[str]]) -> AgentRunResult[str]:
+        headers = {'Authorization': f'Bearer {settings.FIRECRAWL_API_KEY}'} if settings.FIRECRAWL_API_KEY else {}
+        async with (
+            self.subscription.model(DEFAULT_MODEL) as model,
+            httpx2.AsyncClient(base_url=settings.FIRECRAWL_BASE_URL,
+                              headers=headers, follow_redirects=False) as client,
+        ):
+            return await ResearchAgent(model, Firecrawl(client)).run_turn(message, history, forget)

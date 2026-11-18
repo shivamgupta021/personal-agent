@@ -164,7 +164,7 @@ def test_second_poller_cannot_process_updates(tmp_path: Path) -> None:
                 raise AssertionError('Two pollers acquired the same lock')
 
 
-def test_start_command_explains_standalone_behavior_without_model(tmp_path: Path) -> None:
+def test_start_command_explains_conversation_behavior_without_model(tmp_path: Path) -> None:
     replies: list[str] = []
 
     def telegram(request: httpx2.Request) -> httpx2.Response:
@@ -185,8 +185,8 @@ def test_start_command_explains_standalone_behavior_without_model(tmp_path: Path
             with service.state.locked():
                 await service.poll_once()
     asyncio.run(run())
-    assert 'standalone' in replies[0]
-    assert 'no conversation memory' in replies[0]
+    assert 'follow-up' in replies[0]
+    assert 'survives restarts' in replies[0]
 
 
 def test_invalid_bot_credentials_stop_polling_without_leaking_token(tmp_path: Path) -> None:
