@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx2
 import pytest
+from django.conf import settings
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
@@ -38,8 +39,9 @@ class CaptureSession(Session):
 
 
 @pytest.fixture
-def native_tracing() -> Iterator[CaptureSession]:
+def native_tracing(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[CaptureSession]:
     session = CaptureSession()
+    monkeypatch.setattr(settings, "LANGFUSE_CAPTURE_CONTENT", getattr(request, "param", False))
     tracing.configure(OTLPSpanExporter(endpoint='http://langfuse/api/public/otel/v1/traces', session=session))
     try:
         yield session
@@ -47,7 +49,8 @@ def native_tracing() -> Iterator[CaptureSession]:
         tracing.shutdown()
 
 
-def test_native_spans_capture_tools_and_usage_without_content(native_tracing: CaptureSession) -> None:
+@pytest.mark.parametrize("native_tracing", [False, True], indirect=True)
+def test_native_spans_capture_tools_and_usage_with_configured_content(native_tracing: CaptureSession, request: pytest.FixtureRequest) -> None:
     def web(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json={'success': True, 'data': {'web': [
             {'url': 'https://example.com/private-url', 'description': 'private-page'}]}})
@@ -66,7 +69,7 @@ def test_native_spans_capture_tools_and_usage_without_content(native_tracing: Ca
     tracing.flush()
     bodies = b''.join(native_tracing.bodies)
     for secret in [b'private-prompt', b'private-answer', b'private-query', b'private-page', b'private-url']:
-        assert secret not in bodies
+        assert (secret in bodies) is request.node.callspec.params['native_tracing']
     spans = native_tracing.spans()
     assert len(spans) >= 4  # agent run, two model calls, one tool call
     assert any('search' in span.name for span in spans)

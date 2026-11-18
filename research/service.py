@@ -5,6 +5,7 @@ from django.conf import settings
 
 from research.agent import ResearchAgent
 from research.tools.firecrawl import Firecrawl
+from subscriptions.constants import DEFAULT_MODEL
 from subscriptions.service import SubscriptionService
 
 
@@ -12,7 +13,7 @@ class ResearchService:
     def __init__(self, subscription: SubscriptionService) -> None:
         self.subscription = subscription
 
-    async def run(self, message: str, model_name: str) -> str:
+    async def run(self, message: str, model_name: str = DEFAULT_MODEL) -> str:
         headers = {'Authorization': f'Bearer {settings.FIRECRAWL_API_KEY}'} if settings.FIRECRAWL_API_KEY else {}
         async with (
             self.subscription.model(model_name) as model,
