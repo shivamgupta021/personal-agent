@@ -73,6 +73,9 @@ def test_native_spans_capture_tools_and_usage_with_configured_content(native_tra
     spans = native_tracing.spans()
     assert len(spans) >= 4  # agent run, two model calls, one tool call
     assert any('search' in span.name for span in spans)
+    retrieval = next(span for span in spans if span.name == 'firecrawl.search')
+    parent = next(span for span in spans if span.span_id == retrieval.parent_span_id)
+    assert 'search' in parent.name
     assert any(a.key == 'gen_ai.usage.input_tokens' for span in spans for a in span.attributes)
     assert len({span.trace_id for span in spans}) == 1
     assert any(span.parent_span_id for span in spans)

@@ -60,3 +60,13 @@ uv run pytest -q
 ```
 
 Controlled tests exercise real application code with substituted model/HTTP boundaries. They don't consume subscription usage or establish model research quality. Live subscription plus local Firecrawl research has also been exercised separately.
+
+## Retrieval behavior
+
+Missing search-result fields are reported as unavailable, rather than confirmed empty results.
+Each Firecrawl HTTP operation is visible as a nested `firecrawl.search` or `firecrawl.scrape`
+observation. Content follows the tracing opt-in.
+
+Page reads recognize explicit Markdown definition/heading permalinks and select the requested
+anchor section before sending evidence to the model. Unrecognized anchors retain page pagination;
+`section_found` and `offset_scope` identify the selection. Unanchored pages can still contain noise.

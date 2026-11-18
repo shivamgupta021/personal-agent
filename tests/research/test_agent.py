@@ -224,9 +224,12 @@ def test_query_batch_limit_prevents_excess_web_requests() -> None:
 
 
 
-def test_empty_successful_search_is_not_reported_as_a_failure() -> None:
+@pytest.mark.parametrize('data, expected_failures', [({'web': []}, 0), ({}, 1)])
+def test_empty_search_distinguishes_explicit_results_from_ambiguous_response(
+    data: dict[str, Any], expected_failures: int,
+) -> None:
     def web(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(200, json={'success': True, 'data': {}})
+        return httpx2.Response(200, json={'success': True, 'data': data})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
@@ -235,8 +238,8 @@ def test_empty_successful_search_is_not_reported_as_a_failure() -> None:
         content = results[-1].content
         assert isinstance(content, dict)
         assert content.get('sources') == []
-        assert content.get('failed_queries') == 0
-        assert 'error' not in content
+        assert content.get('failed_queries') == expected_failures
+        assert ('error' in content) is bool(expected_failures)
         return ModelResponse(parts=[TextPart('No matching sources were found.')])
 
     async def exercise() -> None:
