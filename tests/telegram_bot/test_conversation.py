@@ -12,6 +12,7 @@ import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+from conversations.models import ConversationRecord, ConversationSummary
 from conversations.service import ConversationService
 from conversations import constants
 from conversations.cleanup import TraceCleanup
@@ -254,6 +255,24 @@ def test_compaction_preserves_early_fact_across_restart(tmp_path: Path) -> None:
             return ModelResponse(parts=[TextPart('The user code is indigo. No outstanding research.')])
         return ModelResponse(parts=[TextPart('indigo' if 'indigo' in str(messages) else 'unknown')])
 
+    @sync_to_async
+    def verify_persisted_state() -> None:
+        if turn == 6:
+            record = ConversationRecord.objects.get(identity='compaction-test')
+            snapshots = list(ConversationSummary.objects.filter(conversation=record).order_by('pk'))
+            assert len(snapshots) >= 2
+            assert len(record.archive) == 12  # All six completed user/assistant pairs.
+            assert 'My code is indigo.' in json.dumps(record.archive)
+            previous_sources: set[str] = set()
+            for summary in snapshots:
+                sources = summary.snapshot['metadata']['summary_sources']
+                assert sources
+                assert previous_sources <= set(sources) <= record.archive.keys()
+                previous_sources = set(sources)
+        if turn == 7:
+            assert not ConversationRecord.objects.filter(identity='compaction-test').exists()
+            assert not ConversationSummary.objects.exists()
+
     async def run() -> None:
         async with (
             httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http,
@@ -264,6 +283,7 @@ def test_compaction_preserves_early_fact_across_restart(tmp_path: Path) -> None:
                     ConversationService('compaction-test', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
                 with service.state.locked():
                     await service.poll_once()
+                await verify_persisted_state()
     asyncio.run(run())
     assert replies[:6] == ['indigo'] * 6
     assert 'deleted locally' in replies[6]

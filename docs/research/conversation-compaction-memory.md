@@ -85,3 +85,31 @@ save the original-message archive, reduced active context, and summary snapshots
 source identifiers; failed turns leave committed state unchanged. Whole-conversation
 deletion cascades to summary snapshots, and nested summary traces share the recorded
 turn trace for deletion. Archival recall remains milestone #25.
+
+Validation: all 57 tests, Django checks, and typechecking (87 files) passed.
+Controlled Telegram-turn tests cover repeated compaction across service restarts,
+summary failures below/above the hard limit, large tool results with complete tool
+pairs, oversized input, and whole-conversation deletion.
+
+A four-turn real-model comparison retained the corrected budget (700), unresolved
+vendor selection, project name, and exact fictional source URL on both paths:
+
+| Path | Summary calls | Total generation tokens | Four-turn elapsed |
+| --- | ---: | ---: | ---: |
+| Automatic compaction | 2 | 9,955 | 24.21 seconds |
+| Full history | 0 | 12,053 | 13.83 seconds |
+
+Tokens sum every generation, including both summarizers. This single synthetic case
+shows a latency tradeoff, not a general speed or quality benchmark. Both coarse
+checks passed and final answers were manually inspected. Summary source references
+and original-message retention were inspected in local database records.
+
+Compaction trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/6e4fbae74af35eb91fe0cfd8196aa8e9
+Baseline trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/8e31026b356a0d93706b91b898b552e5
+
+Review follow-up: a stronger cumulative-lineage assertion exposed that Pydantic may
+merge consecutive requests and discard message-level metadata. Summary provenance
+now lives on `CompactionPart.metadata`, which survives normalization; original
+capture uses durable run history. The public-turn regression verifies all original
+pairs, cumulative resolvable source coverage, and removal of archive/summary records.
+Standards review found no issues; the spec review's validation finding was resolved.

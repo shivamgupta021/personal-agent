@@ -33,8 +33,8 @@ class ConversationCompaction(AbstractCapability[None]):
         return len(text.encode())
 
     async def before_model_request(self, ctx: RunContext[None], request_context: ModelRequestContext) -> ModelRequestContext:
-        self.context.capture(request_context.messages)
-        before = list(request_context.messages)
+        self.context.capture(ctx.messages)
+        before = list(ctx.messages)
         size = ConversationBudget.size(request_context)
         if self.context.compact and size > constants.COMPACTION_TRIGGER_BYTES and self.attempts < constants.MAX_COMPACTIONS_PER_TURN:
             self.attempts += 1

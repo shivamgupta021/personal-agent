@@ -30,8 +30,15 @@ class ConversationContext:
             if metadata.get('archive_id') not in retained:
                 if metadata.get('archive_id'):
                     sources.add(metadata['archive_id'])
-            sources.update(metadata.get('summary_sources', []))
+            for part in message.parts:
+                if isinstance(part, CompactionPart):
+                    sources.update((part.metadata or {}).get('summary_sources', []))
         for message in after:
             if any(isinstance(part, CompactionPart) for part in message.parts):
+                # Core may merge adjacent requests and discard message-level metadata.
+                # Part metadata survives that normalization and carries cumulative lineage.
+                for part in message.parts:
+                    if isinstance(part, CompactionPart):
+                        part.metadata = {**(part.metadata or {}), 'summary_sources': sorted(sources)}
                 message.metadata = {**(message.metadata or {}), 'summary_sources': sorted(sources)}
                 self.summaries.append(deepcopy(message))
