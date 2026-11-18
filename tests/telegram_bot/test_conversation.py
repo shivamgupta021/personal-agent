@@ -13,6 +13,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCall
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from conversations.service import ConversationService
+from conversations import constants
 from conversations.cleanup import TraceCleanup
 from core.tracing import tracing
 from telegram_bot.client import TelegramError
@@ -95,13 +96,13 @@ def test_forgetting_stops_old_context_and_requests_trace_cleanup(tmp_path: Path)
 
 
 @pytest.mark.django_db(transaction=True)
-def test_oversized_follow_up_keeps_previous_context(tmp_path: Path) -> None:
+def test_oversized_follow_up_keeps_previous_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     replies: list[str] = []
     turn = 0
     def telegram(request: httpx2.Request) -> httpx2.Response:
         nonlocal turn
         if request.url.path.endswith('getUpdates'):
-            texts = ['My example is amber.', 'x' * 50_000, 'What was my example?']
+            texts = ['My example is amber.', 'x' * 50_000, 'What was my example?', 'Delete this entire conversation.', 'What was my example?']
             text = texts[turn]
             turn += 1
             return httpx2.Response(200, json={'ok': True, 'result': [{
@@ -118,11 +119,15 @@ def test_oversized_follow_up_keeps_previous_context(tmp_path: Path) -> None:
                 conversation = ConversationService('test-budget', ResearchAgent(model, Firecrawl(web)))
                 service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
                 with service.state.locked():
-                    for _ in range(3):
+                    for index in range(5):
+                        # Prove deletion works even when the retained history itself cannot fit.
+                        monkeypatch.setattr(constants, 'MAX_REQUEST_BYTES', 1 if index == 3 else 48_000)
                         await service.poll_once()
     asyncio.run(run())
     assert replies[0] == replies[2] == 'amber'
     assert 'saved history is unchanged' in replies[1]
+    assert 'deleted locally' in replies[3]
+    assert replies[4] == 'unknown'
 
 
 @pytest.fixture(autouse=True)
@@ -213,7 +218,7 @@ def test_trace_cleanup_failure_is_retryable_without_restoring_history(tmp_path: 
         assert 'failed' in replies[1]
         assert 'deletion requested' in replies[2]
         assert replies[3] == 'unknown'
-        assert len(set(requested)) == 2
-        assert requested[:2] == requested[2:]
+        assert len(set(requested)) == 1
+        assert requested[:1] == requested[1:]
     finally:
         tracing.shutdown()

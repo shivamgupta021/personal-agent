@@ -8,6 +8,7 @@ from pydantic_ai.run import AgentRunResult
 
 from conversations.budget import ContextBudgetExceeded
 from conversations.cleanup import TraceCleanup
+from conversations.constants import DELETE_CONVERSATION_PHRASES
 from conversations.store import ConversationStore
 from core.tracing import tracing
 
@@ -30,7 +31,11 @@ class ConversationService:
         self.store = ConversationStore()
 
     async def run(self, message: str) -> str:
-        if message.strip().casefold() == 'retry trace cleanup':
+        control = message.strip().rstrip('.!').casefold()
+        if control in DELETE_CONVERSATION_PHRASES:
+            await self.store.forget(self.identity)
+            return 'Conversation deleted locally. ' + await self.cleanup(self.identity)
+        if control == 'retry trace cleanup':
             return await self.cleanup(self.identity)
         history = await self.store.history(self.identity)
         try:

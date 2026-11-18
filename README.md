@@ -242,3 +242,12 @@ from the owner's Telegram conversation.
 Database tests use Django's isolated `test_personal_agent` database; the development
 role needs permission to create a test database. No test should point at the live
 application database as its test database.
+
+Validation checkpoint for #23: 54 deterministic tests and strict typechecking passed.
+A real-model Langfuse experiment verified the three coarse conversation checks;
+manual review confirmed language recall, corrected-budget precedence, and clarification
+of ambiguous orders. A separate synthetic real-model deletion check returned “I don't
+recall your code word” after deletion. Trace deletion is asynchronous and must be
+checked separately; an accepted request alone is not proof of remote erasure.
+The exact phrase “Delete this entire conversation” also works without a model call,
+including when saved context is already over budget or model access is unavailable.
