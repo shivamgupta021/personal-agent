@@ -95,3 +95,39 @@ observation. Content follows the tracing opt-in.
 Page reads recognize explicit Markdown definition/heading permalinks and select the requested
 anchor section before sending evidence to the model. Unrecognized anchors retain page pagination;
 `section_found` and `offset_scope` identify the selection. Unanchored pages can still contain noise.
+
+## Research evaluations
+
+Run the real research loop against fixed, fictional web fixtures:
+
+```sh
+uv run python manage.py evaluate_research
+uv run python manage.py evaluate_research --live-model --output .local/evaluations/model.json
+```
+
+The first command replays controlled model responses to check orchestration and the evaluator.
+The second consumes subscription usage with the configured model (default GPT-6.2 Sol), while
+web responses remain fixed. Neither command measures live Firecrawl reliability. Normal
+`research` remains the separate end-to-end smoke check. Query planners stay disabled.
+
+The four scenarios cover anchored evidence, recovery after empty search, unavailable search,
+and continuation through a noisy unanchored page. `research/evaluation/cases.json` holds
+questions, web fixtures, replay steps and expectations; `--suite PATH` selects another suite.
+Search fixtures return responses in request order, regardless of query text: query relevance
+must be reviewed manually. Unexpected page URLs fail rather than accessing the network.
+
+Reports go to stdout and `--output` (default `.local/evaluations/latest.json`). Failed checks
+return exit status 1 after writing the report. Review `evidence_checks` separately from
+`answer_checks`, then inspect the answer, queries, search results and page excerpts. Token
+counts and elapsed time are recorded; replay timings/tokens are not model benchmarks.
+Suite and prompt hashes identify the evaluated inputs.
+
+Automatic checks use literal phrases, citation URLs and retrieval budgets. A pass does not
+establish factual entailment or model quality; a failure may be a valid paraphrase requiring
+human review. Check whether each claim is supported, queries are relevant, uncertainty is
+honest, and the answer is useful. Unanchored-page warnings deliberately expose irrelevant
+opening excerpts even when later evidence allows the answer to pass.
+
+Langfuse uses the normal tracing settings, including content opt-in. Evaluation retrieval
+spans represent fixtures, not actual Firecrawl requests; the fictional questions distinguish
+these runs from real research. No evaluation results are uploaded as Langfuse scores yet.
