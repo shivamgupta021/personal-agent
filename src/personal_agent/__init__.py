@@ -1,1 +1,1 @@
-"""Learning examples for a personal grievance assistant."""
+"""Local personal assistant Django project."""

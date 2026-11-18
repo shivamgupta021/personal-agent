@@ -11,9 +11,7 @@ from urllib.parse import urlsplit
 import httpx2
 from pydantic import Field, StringConstraints
 
-from personal_agent import constants
-from personal_agent.enums import ToolName
-from personal_agent.telemetry import tracing
+from personal_agent.research import constants
 
 logger = logging.getLogger(__name__)
 SearchQuery = Annotated[str, StringConstraints(
@@ -29,7 +27,7 @@ class Firecrawl:
         self, queries: Annotated[list[SearchQuery], Field(min_length=1, max_length=constants.SEARCH_MAX_QUERIES)],
     ) -> dict[str, Any]:
         """Search one to three focused, complementary public queries planned from the user's question."""
-        tracing.record_tool(ToolName.SEARCH)
+        logger.info('Search started')
         sources: dict[str, dict[str, str]] = {}
         failures = 0
         # Bound service load, remove duplicate queries, and merge sources by URL.
@@ -62,7 +60,7 @@ class Firecrawl:
         offset: Annotated[int, Field(ge=0, le=constants.WEB_RESPONSE_MAX_BYTES)] = 0,
     ) -> dict[str, Any]:
         """Read a public page. Use next_offset to continue long pages; cite URL and retrieval date."""
-        tracing.record_tool(ToolName.READ_PAGE)
+        logger.info('Page read started')
         if not self._is_public_url(url):
             return {'error': 'public_url_required'}
         data = await self._post('/v2/scrape', {'url': url, 'formats': ['markdown'], 'onlyMainContent': True})

@@ -1,0 +1,63 @@
+"""Configure native Pydantic AI instrumentation and a standard Langfuse OTLP exporter once."""
+
+import base64
+import logging
+
+from django.conf import settings
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+from pydantic_ai import Agent
+from pydantic_ai.models.instrumented import InstrumentationSettings
+
+logger = logging.getLogger(__name__)
+
+
+class Tracing:
+    def __init__(self) -> None:
+        self._provider: TracerProvider | None = None
+
+    def configure(self, exporter: SpanExporter | None = None) -> None:
+        if self._provider is not None:
+            return
+        if exporter is None:
+            if not settings.LANGFUSE_PUBLIC_KEY or not settings.LANGFUSE_SECRET_KEY:
+                Agent.instrument_all(False)
+                logger.info('Tracing disabled: configure both Langfuse project keys to enable it')
+                return
+            credentials = f'{settings.LANGFUSE_PUBLIC_KEY}:{settings.LANGFUSE_SECRET_KEY}'.encode()
+            exporter = OTLPSpanExporter(
+                endpoint=f'{settings.LANGFUSE_BASE_URL.rstrip("/")}/api/public/otel/v1/traces',
+                headers={'Authorization': 'Basic ' + base64.b64encode(credentials).decode(),
+                         'x-langfuse-ingestion-version': '4'},
+                timeout=settings.LANGFUSE_TIMEOUT_SECONDS,
+            )
+        self._provider = TracerProvider(
+            resource=Resource.create({'service.name': 'personal-agent'}), shutdown_on_exit=False,
+        )
+        self._provider.add_span_processor(BatchSpanProcessor(exporter))
+        Agent.instrument_all(InstrumentationSettings(
+            tracer_provider=self._provider,
+            include_content=False,
+            include_binary_content=False,
+            include_model_request_parameters=False,
+        ))
+        logger.info('Native Pydantic AI tracing enabled; content capture disabled')
+
+    def flush(self) -> None:
+        if self._provider is not None:
+            try:
+                if not self._provider.force_flush(timeout_millis=int(settings.LANGFUSE_TIMEOUT_SECONDS * 1000)):
+                    logger.warning('Trace export did not finish before its deadline')
+            except Exception:
+                logger.warning('Trace export unavailable; application result is unaffected')
+
+    def shutdown(self) -> None:
+        if self._provider is not None:
+            provider, self._provider = self._provider, None
+            Agent.instrument_all(False)
+            provider.shutdown()
+
+
+tracing = Tracing()

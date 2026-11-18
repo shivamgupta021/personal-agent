@@ -9,10 +9,9 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from personal_agent.firecrawl import Firecrawl
-from personal_agent.research import ResearchAgent
-from personal_agent.telemetry import tracing
-from personal_agent import constants
+from personal_agent.research.tools.firecrawl import Firecrawl
+from personal_agent.research.agent import ResearchAgent
+from personal_agent.research import constants
 
 
 def test_research_searches_reads_and_answers_with_fresh_history(caplog: pytest.LogCaptureFixture) -> None:
@@ -50,9 +49,8 @@ def test_research_searches_reads_and_answers_with_fresh_history(caplog: pytest.L
         assert requests == ['/v2/search', '/v2/scrape'] * 2
 
     asyncio.run(exercise())
-    assert 'Tool started: search' in caplog.text
-    assert 'Tool started: read_page' in caplog.text
-    assert 'requests=3' in caplog.text
+    assert 'Search started' in caplog.text
+    assert 'Page read started' in caplog.text
 
 
 @pytest.mark.parametrize('max_requests,max_tools', [(1, 10), (8, 0)])
@@ -92,43 +90,6 @@ def test_research_timeout_stops_the_run(monkeypatch: pytest.MonkeyPatch) -> None
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize('trace_status', [200, 503])
-def test_research_exports_only_metadata_and_survives_trace_failure(trace_status: int) -> None:
-    exported: list[dict[str, Any]] = []
-
-    def trace(request: httpx2.Request) -> httpx2.Response:
-        assert request.url.path == '/api/public/otel/v1/traces'
-        body = json.loads(request.content)
-        exported.append(body)
-        serialized = request.content.decode()
-        for secret in ['private-prompt', 'private-answer', 'private-query', 'private-page', 'secret-token']:
-            assert secret not in serialized
-        return httpx2.Response(trace_status, json={} if trace_status == 200 else {'error': 'private-server-error'})
-
-    def web(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(200, json={'success': True, 'data': {'web': [
-            {'url': 'https://example.com', 'description': 'private-page'}]}})
-
-    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
-            return ModelResponse(parts=[TextPart('private-answer')])
-        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['private-query']})])
-
-    async def exercise() -> None:
-        async with (httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as web_client,
-                    httpx2.AsyncClient(base_url='http://langfuse', auth=('public-key', 'secret-token'),
-                                      transport=httpx2.MockTransport(trace)) as trace_client):
-            async with tracing.startup(client=trace_client):
-                agent = ResearchAgent(FunctionModel(model), Firecrawl(web_client))
-                assert await agent.run('private-prompt') == 'private-answer'
-        span = exported[0]['resourceSpans'][0]['scopeSpans'][0]['spans'][0]
-        attrs = {a['key']: a['value'] for a in span['attributes']}
-        assert attrs['agent.tool_names']['stringValue'] == 'search'
-        assert attrs['agent.requests']['intValue'] == '2'
-        assert span['name'] == 'research'
-        assert int(span['endTimeUnixNano']) >= int(span['startTimeUnixNano'])
-
-    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize('failure', ['http', 'malformed', 'oversized', 'private_url', 'blocked_page', 'malformed_url'])
@@ -259,70 +220,8 @@ def test_query_batch_limit_prevents_excess_web_requests() -> None:
     asyncio.run(exercise())
 
 
-def test_shared_tracing_keeps_concurrent_runs_separate() -> None:
-    exported: list[dict[str, Any]] = []
-
-    def export(request: httpx2.Request) -> httpx2.Response:
-        exported.append(json.loads(request.content)['resourceSpans'][0]['scopeSpans'][0]['spans'][0])
-        return httpx2.Response(200, json={})
-
-    async def web(request: httpx2.Request) -> httpx2.Response:
-        await asyncio.sleep(0)
-        data: dict[str, Any] = {'web': []} if request.url.path == '/v2/search' else {'markdown': 'Public page'}
-        return httpx2.Response(200, json={'success': True, 'data': data})
-
-    def search_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
-            return ModelResponse(parts=[TextPart('Search finished')])
-        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['public topic']})])
-
-    def read_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        if any(isinstance(p, ToolReturnPart) for m in messages for p in m.parts):
-            return ModelResponse(parts=[TextPart('Read finished')])
-        return ModelResponse(parts=[ToolCallPart('read_page', {'url': 'https://example.com'})])
-
-    async def exercise() -> None:
-        async with (httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client,
-                    httpx2.AsyncClient(base_url='http://langfuse', transport=httpx2.MockTransport(export)) as trace_client,
-                    tracing.startup(client=trace_client)):
-            answers = await asyncio.gather(
-                ResearchAgent(FunctionModel(search_model), Firecrawl(client)).run('Search'),
-                ResearchAgent(FunctionModel(read_model), Firecrawl(client)).run('Read'),
-            )
-            assert tuple(answers) == ('Search finished', 'Read finished')
-        assert len({span['traceId'] for span in exported}) == 2
-        names = []
-        for span in exported:
-            attrs = {a['key']: a['value'] for a in span['attributes']}
-            names.append(attrs['agent.tool_names']['stringValue'])
-            assert attrs['agent.requests']['intValue'] == '2'
-            assert attrs['agent.tool_calls']['intValue'] == '1'
-        assert sorted(names) == ['read_page', 'search']
-
-    asyncio.run(exercise())
 
 
-def test_cancelled_run_exports_cancelled_status_and_propagates_cancellation() -> None:
-    exported: list[dict[str, Any]] = []
-
-    def export(request: httpx2.Request) -> httpx2.Response:
-        exported.append(json.loads(request.content))
-        return httpx2.Response(200, json={})
-
-    async def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        raise asyncio.CancelledError()
-
-    async def exercise() -> None:
-        async with (httpx2.AsyncClient() as web_client,
-                    httpx2.AsyncClient(base_url='http://langfuse', transport=httpx2.MockTransport(export)) as trace_client,
-                    tracing.startup(client=trace_client)):
-            with pytest.raises(asyncio.CancelledError):
-                await ResearchAgent(FunctionModel(model), Firecrawl(web_client)).run('Public topic')
-        span = exported[0]['resourceSpans'][0]['scopeSpans'][0]['spans'][0]
-        attrs = {a['key']: a['value'] for a in span['attributes']}
-        assert attrs['agent.status']['stringValue'] == 'cancelled'
-
-    asyncio.run(exercise())
 
 
 def test_empty_successful_search_is_not_reported_as_a_failure() -> None:

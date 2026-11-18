@@ -6,7 +6,7 @@ from pathlib import Path
 
 def test_research_requires_its_own_login_and_never_falls_back_to_api_key(tmp_path: Path) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "personal_agent", "research", "Find public documentation", "--model", "test-model",
+        [sys.executable, "manage.py", "research", "Find public documentation", "--model", "test-model",
          "--state-dir", str(tmp_path)],
         env={**os.environ, "PYTHONPATH": "src", "OPENAI_API_KEY": "must-not-be-used"},
         capture_output=True, text=True, timeout=10,
