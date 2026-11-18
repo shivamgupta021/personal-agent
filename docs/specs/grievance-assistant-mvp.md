@@ -125,7 +125,7 @@ The user approved public-web terminal research as the next usable vertical slice
 During manual review, the user requested Django app organization and native Pydantic AI–Langfuse instrumentation. Django now owns settings, logging, startup, and management commands; persistent case models and web endpoints remain out of scope. Global instrumentation replaces the manual trace exporter, with content capture disabled and serialized-payload privacy tests.
 
 
-## Current delivery plan — 18 November 2026
+## Provisional delivery breakdown — 18 November 2026
 
 - Milestone 1: completed as a learning exercise before GitHub tickets existed; synthetic application code was removed in `2363cc0`.
 - [#2](https://github.com/shivamgupta021/personal-agent/issues/2): completed real terminal research, subsequently simplified into root-level Django apps with shared native tracing. Current code checkpoint: `5d2e0cb`.
@@ -142,6 +142,6 @@ During manual review, the user requested Django app organization and native Pyda
 | [#9](https://github.com/shivamgupta021/personal-agent/issues/9) | Milestone 8: complete local case deletion and context cleanup | #8 |
 | [#10](https://github.com/shivamgupta021/personal-agent/issues/10) | Milestone 9: integrated grievance evaluations and MVP acceptance | #9, #3 |
 
-Next implementation: #4, after the current code walkthrough. #3 can be completed independently once local project keys are available and is required before final MVP acceptance. Each ticket includes its observable acceptance criteria, validation boundary and exclusions. GitHub has native blocker links as well as readable dependency lines.
+The user rejected publishing this breakdown before reviewing its granularity and blockers. Build tickets are now needs-triage and are not authorized as the implementation frontier. The [reviewed grievance MVP decision map](https://github.com/shivamgupta021/personal-agent/issues/11) owns unresolved planning decisions. Use to-spec and to-tickets checkpoints before republishing an approved sequence. Implementation is paused while the user learns Langfuse. The separate live Langfuse ingestion check has now succeeded; evidence is recorded in README.
 
 Focused model evaluations accompany drafting/research milestones; #10 integrates the suite rather than introducing evaluation for the first time. The finished MVP remains refund-first grievance assistance with manual external actions. Langfuse prompt management, general multi-agent orchestration, bookings and hosting are deferred.
