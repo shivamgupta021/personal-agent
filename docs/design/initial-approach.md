@@ -1,11 +1,12 @@
 # Initial approach — design interview
 
-Status: interview decisions settled; awaiting final confirmation of shared understanding before implementation. Updated 17 November 2026.
+Status: the user requested implementation and confirmed the milestone-1 testing boundary. Milestone 1 is implemented; subsequent milestones await the agreed learning checkpoint. Updated 17 November 2026.
 
 ## Confirmed context
 
 - Personal use and a showcase project; no current monetization goal.
 - User is comfortable with Python and Django.
+- Use class-based, object-oriented Python for core application behavior, with focused responsibilities, composition and injected dependencies. The user explicitly requested this before further tickets; conventions are recorded in CODING_STANDARDS.md.
 - Run the MVP on the user's M4 Pro MacBook Pro; defer hosting selection.
 - Use direct ChatGPT subscription sign-in. The user has a $100 subscription and has used subscription authentication successfully before. Do not make API-credit eligibility or activation a prerequisite.
 
@@ -59,9 +60,22 @@ The user confirms an existing local installation. Its endpoint and behavior have
 4. Add refund-case intake, local Firecrawl research, sourced email-style drafts, corrections and draft versions.
 5. Add manual sent/outcome updates and follow-up drafts; run the agreed evaluation cases and review usefulness.
 
-This sequence organizes the accepted scope. Review it with the user before implementation; pause for shared inspection at each milestone. No further product design questions are currently open.
+This sequence organizes the accepted scope. Pause for shared inspection at each milestone. No further product design questions are currently open.
 
-## Deferred implementation checks
+## Milestone 1 implementation checkpoint
+
+- The public loop is exercised with controlled responses, alongside CLI and simulated streaming transport checks.
+- Subscription sign-in, model discovery and a real two-request tool-call round trip succeeded using an account-listed model. The read-only synthetic order returned INR 1200; no real grievance or external action was involved.
+- Pydantic's OAuth/provider helper supplies authentication only. The loop is handwritten and does not use its Agent harness.
+- The live check exposed SDK-only parsed fields being replayed as API input. Raw streaming events now preserve API-compatible output; a regression test guards that boundary.
+- Credentials are ignored by Git and stored in an owner-only directory with owner-only files. No API-key fallback is configured.
+- The next checkpoint is inspecting this loop together, before adding Pydantic Agent or Langfuse.
+
+## Learning-first simplification
+
+After reviewing milestone 1, the user found the architecture too complex and authorized simplifying it before moving to new tickets. One `Agent` class now contains a direct `run()` loop and a method for the synthetic lookup. It prints progress directly, returns an answer string and raises safe errors on failure. Separate limits, event, result and demo-tool classes are removed. Model transport and authentication remain separate, all imports remain at module scope, and execution/credential protections are retained. Review this change against baseline `df5fb7b`, confirmed by the user.
+
+## Remaining integration checks for later milestones
 
 - Discover and verify the existing local Firecrawl endpoint and search/page-retrieval behavior.
 - Integrate direct ChatGPT subscription authentication and verify this application's tool-call behavior without recording secrets in project files or traces. This is an integration check, not a renewed debate about subscription access.

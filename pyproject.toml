@@ -1,0 +1,30 @@
+[project]
+name = "personal-agent"
+version = "0.1.0"
+description = "A terminal research agent using ChatGPT subscription access and local Firecrawl"
+requires-python = ">=3.12"
+dependencies = [
+    "django==5.2.19",
+    "httpx2==2.16.2",
+    "openai==3.52.0",
+    "opentelemetry-exporter-otlp-proto-http==1.45.2",
+    "opentelemetry-sdk==1.45.2",
+    "pydantic-ai-slim[openai]==2.69.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.2.0",
+    "mypy==2.4.1",
+    "django-stubs==5.2.9",
+    "types-requests==2.33.0.20261030",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["config", "core", "research", "subscriptions", "tests", "manage.py"]
