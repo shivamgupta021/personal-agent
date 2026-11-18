@@ -150,3 +150,45 @@ run locally through the SDK; they are not server-side automatic evaluators for p
 Stage-specific query, retrieval, selection, and synthesis scores are deferred.
 The SDK serializes evaluation inputs and outputs to Langfuse even if normal tracing content
 capture is off; use this command only with the approved synthetic fixture suite.
+
+## Owner-only Telegram research
+
+Create a bot through Telegram's official [@BotFather](https://t.me/BotFather), then put
+`TELEGRAM_BOT_TOKEN` and your numeric `TELEGRAM_OWNER_ID` in the root `.env`.
+Never put the token in a command argument, commit it, or paste it into chat.
+
+```sh
+uv run python manage.py telegram
+```
+
+Open your bot's private chat and send `/start`, then a public research question such as:
+“Find the official Python documentation for asyncio.timeout and explain deadline expiry.”
+The existing research service returns its answer and source links as plain text. Long replies
+are split. Review the normal `research run` and its model/search/read spans in local Langfuse.
+`LANGFUSE_CAPTURE_CONTENT=true` includes the question and answer, just as in the terminal flow.
+
+Only the configured owner in their private chat is accepted. Each message is independent:
+there is no saved conversation or preference memory. Questions run serially, using the
+existing subscription lock. Keep one bot process running; Ctrl-C stops it.
+
+A private cursor file under `.local/telegram/` is saved **before** work starts. Interrupted
+research or uncertain reply delivery is not retried automatically: resend the question.
+This may lose an unanswered request but avoids automatically repeating it. A split answer
+can be partially delivered. No exactly-once delivery guarantee is claimed. Telegram retains
+pending updates for at most 24 hours; a cursor unused for a week is reset because Telegram
+may restart with a random update ID. Do not delete state to retry a question; send a new message.
+
+Token rotation for the same bot preserves its cursor. Webhooks and other pollers can conflict
+with long polling; this command does not delete webhooks automatically. Invalid credentials
+or polling conflicts stop the command; transient network failures wait and resume polling.
+
+Transport regression tests use controlled HTTP/model boundaries. The Langfuse research
+experiments remain the model-quality workflow; Telegram introduces no new research prompt.
+The live round trip requires your bot token and owner ID and is separate from those tests.
+
+Live transport verification on 18 November 2026: an owner message reached the real research
+service and Telegram accepted the reply. Langfuse trace
+`daa396856f5813404569ea7be406760a` recorded 15.669 seconds, three model generations,
+one search (five sources, zero failed queries), and one 2,342-character page read.
+Content capture was disabled for that run. This verifies delivery through the API and trace
+ingestion; the owner also confirmed receiving the answer and source link in Telegram.

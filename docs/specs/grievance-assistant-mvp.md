@@ -145,3 +145,26 @@ During manual review, the user requested Django app organization and native Pyda
 The user rejected publishing this breakdown before reviewing its granularity and blockers. Build tickets are now needs-triage and are not authorized as the implementation frontier. The [reviewed grievance MVP decision map](https://github.com/shivamgupta021/personal-agent/issues/11) owns unresolved planning decisions. Use to-spec and to-tickets checkpoints before republishing an approved sequence. Implementation is paused while the user learns Langfuse. The separate live Langfuse ingestion check has now succeeded; evidence is recorded in README.
 
 Focused model evaluations accompany drafting/research milestones; #10 integrates the suite rather than introducing evaluation for the first time. The finished MVP remains refund-first grievance assistance with manual external actions. Langfuse prompt management, general multi-agent orchestration, bookings and hosting are deferred.
+
+## Approved Telegram research slice — 18 November 2026
+
+This replaces the combined Telegram-and-memory scope of #4 for the next learning milestone,
+following #12 and the user's explicit implementation approval. Broader context/deletion
+questions in #13–#15 remain for subsequent milestones.
+
+- A local Django command uses long polling and accepts only the configured owner's private
+  text messages. Other users and group chats cannot reach the model or cause replies.
+- Each message is a standalone public research request using the existing ResearchService,
+  subscription model, Firecrawl tools, and native Langfuse instrumentation. Process one at a time.
+- Save the next Telegram update cursor atomically before starting work. After interruption,
+  do not automatically rerun research or resend uncertain replies: the owner must resend the
+  question. Persist only cursor/timestamp, not prompts, answers, preferences, or chat history.
+- One local process per bot state directory; no automatic webhook deletion or deployment.
+- Split long replies without dropping text; preserve source links as plain text. Provide local
+  help and sanitized failure messages. Respect rate-limit waits without retrying uncertain sends.
+- No conversation memory, explicit preference tools, grievance intake, database, or general
+  orchestrator in this slice. Keep the later explicit-memory exercise in the roadmap.
+- Approved test seam: public polling/turn boundary with controlled Telegram HTTP and model
+  responses. Cover access control, replies/citations, splitting, duplicates/restart, cancellation,
+  and failures. A separate live owner-message round trip verifies real Telegram configuration
+  and Langfuse ingestion. Code review baseline: a5892b8.
