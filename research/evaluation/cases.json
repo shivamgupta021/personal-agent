@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "anchored_policy",
+      "question": "Read https://example.com/policy#returns and state the unused-item return deadline with a citation. This is a fictional evaluation policy; search for the official policy first.",
+      "search_responses": [
+        {
+          "success": true,
+          "data": {
+            "web": [
+              {
+                "url": "https://example.com/policy#returns",
+                "title": "Official return policy",
+                "description": "Unused-item returns"
+              }
+            ]
+          }
+        }
+      ],
+      "pages": {
+        "https://example.com/policy": "Navigation menu\n\nReturns[\u00b6](https://example.com/policy#returns \"Link to this heading\")\n\nUnused items may be returned within 14 days.\n\nDelivery[\u00b6](https://example.com/policy#delivery \"Link to this heading\")\n\nUnrelated delivery information."
+      },
+      "replay": [
+        {
+          "tool": "search",
+          "arguments": {
+            "queries": [
+              "official return policy"
+            ]
+          }
+        },
+        {
+          "tool": "read_page",
+          "arguments": {
+            "url": "https://example.com/policy#returns"
+          }
+        },
+        {
+          "answer": "Unused items may be returned within 14 days. [Policy](https://example.com/policy#returns)"
+        }
+      ],
+      "expect": {
+        "evidence_contains": [
+          "Unused items",
+          "14 days"
+        ],
+        "evidence_excludes": [
+          "Navigation menu",
+          "Unrelated delivery"
+        ],
+        "answer_contains": [
+          "14 days"
+        ],
+        "citations": [
+          "https://example.com/policy#returns"
+        ],
+        "max_read_calls": 1,
+        "max_evidence_characters": 1000
+      }
+    },
+    {
+      "id": "empty_search_recovery",
+      "question": "Find the official unused-item return deadline for the fictional Example shop and cite the policy. If a search finds nothing, broaden it.",
+      "search_responses": [
+        {
+          "success": true,
+          "data": {
+            "web": []
+          }
+        },
+        {
+          "success": true,
+          "data": {
+            "web": [
+              {
+                "url": "https://example.com/policy#returns",
+                "title": "Official return policy",
+                "description": "Unused-item returns"
+              }
+            ]
+          }
+        }
+      ],
+      "pages": {
+        "https://example.com/policy": "Navigation menu\n\nReturns[\u00b6](https://example.com/policy#returns \"Link to this heading\")\n\nUnused items may be returned within 14 days.\n\nDelivery[\u00b6](https://example.com/policy#delivery \"Link to this heading\")\n\nUnrelated delivery information."
+      },
+      "replay": [
+        {
+          "tool": "search",
+          "arguments": {
+            "queries": [
+              "Example shop unused goods eligibility deadline detailed conditions"
+            ]
+          }
+        },
+        {
+          "tool": "search",
+          "arguments": {
+            "queries": [
+              "official return policy"
+            ]
+          }
+        },
+        {
+          "tool": "read_page",
+          "arguments": {
+            "url": "https://example.com/policy#returns"
+          }
+        },
+        {
+          "answer": "Unused items may be returned within 14 days. [Policy](https://example.com/policy#returns)"
+        }
+      ],
+      "expect": {
+        "evidence_contains": [
+          "Unused items",
+          "14 days"
+        ],
+        "evidence_excludes": [
+          "Navigation menu",
+          "Unrelated delivery"
+        ],
+        "answer_contains": [
+          "14 days"
+        ],
+        "citations": [
+          "https://example.com/policy#returns"
+        ],
+        "max_read_calls": 1,
+        "max_evidence_characters": 1000,
+        "min_searches": 2,
+        "min_distinct_queries": 2
+      }
+    },
+    {
+      "id": "unavailable_search",
+      "question": "Find the fictional Example shop return deadline. If research is unavailable, explain that you cannot verify it; do not invent a deadline.",
+      "search_responses": [
+        {
+          "success": true,
+          "data": {}
+        }
+      ],
+      "pages": {},
+      "replay": [
+        {
+          "tool": "search",
+          "arguments": {
+            "queries": [
+              "Example shop return policy"
+            ]
+          }
+        },
+        {
+          "answer": "I cannot verify the return deadline because search is unavailable."
+        }
+      ],
+      "expect": {
+        "answer_contains": [
+          "verify"
+        ],
+        "answer_excludes": [
+          "14 days",
+          "30 days"
+        ],
+        "search_failure": true,
+        "max_read_calls": 0,
+        "max_evidence_characters": 0
+      }
+    },
+    {
+      "id": "unanchored_policy",
+      "question": "Read https://example.com/long-policy and state the unused-item return deadline with a citation. Search for the official policy first; continue reading if the opening excerpt is incomplete.",
+      "search_responses": [
+        {
+          "success": true,
+          "data": {
+            "web": [
+              {
+                "url": "https://example.com/long-policy",
+                "title": "Official return policy",
+                "description": "Unused-item returns"
+              }
+            ]
+          }
+        }
+      ],
+      "pages": {
+        "https://example.com/long-policy": "Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. Menu link. \nUnused items may be returned within 14 days."
+      },
+      "replay": [
+        {
+          "tool": "search",
+          "arguments": {
+            "queries": [
+              "official return policy"
+            ]
+          }
+        },
+        {
+          "tool": "read_page",
+          "arguments": {
+            "url": "https://example.com/long-policy"
+          }
+        },
+        {
+          "tool": "read_page",
+          "arguments": {
+            "url": "https://example.com/long-policy",
+            "offset": 16000
+          }
+        },
+        {
+          "answer": "Unused items may be returned within 14 days. [Policy](https://example.com/long-policy)"
+        }
+      ],
+      "expect": {
+        "evidence_contains": [
+          "Unused items",
+          "14 days"
+        ],
+        "evidence_excludes": [],
+        "answer_contains": [
+          "14 days"
+        ],
+        "citations": [
+          "https://example.com/long-policy"
+        ],
+        "max_read_calls": 2,
+        "max_evidence_characters": 18000
+      }
+    }
+  ]
+}

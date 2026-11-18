@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "django==5.2.19",
     "httpx2==2.16.2",
+    "langfuse==5.2.0",
     "openai==3.52.0",
     "opentelemetry-exporter-otlp-proto-http==1.45.2",
     "opentelemetry-sdk==1.45.2",
