@@ -4,6 +4,13 @@ Grievance redressal covers seeking a remedy from a company for a problem with it
 
 ## Language
 
+**Conversation context**:
+The task-specific facts and prior discussion needed to understand the person's follow-up messages. Keeping this context does not make every statement a lasting preference.
+
+**Saved preference**:
+A preference the person explicitly asked to retain, or approved retaining, for use across conversations.
+_Avoid_: Treating an inferred preference or a one-off task constraint as a saved preference
+
 **Grievance case**:
 A particular problem a person wants a company to remedy, together with the facts and correspondence relating to that problem.
 _Avoid_: Refund case as the name for all grievance cases
