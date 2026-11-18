@@ -23,12 +23,15 @@ from research.tools.firecrawl import Firecrawl
 class ResearchEvaluation:
     async def run(self, suite: EvaluationSuite, model: Model | None = None) -> EvaluationReport:
         results = [await self._run_case(case, model) for case in suite.cases]
+        return self.report(suite, results, model.model_name if model else None)
+
+    def report(self, suite: EvaluationSuite, results: list[CaseResult], model_name: str | None) -> EvaluationReport:
         return EvaluationReport(
             suite_version=suite.version,
             suite_sha256=hashlib.sha256(suite.model_dump_json().encode()).hexdigest(),
             prompt_sha256=hashlib.sha256(DIRECT_RESEARCH_INSTRUCTIONS.encode()).hexdigest(),
-            mode='model' if model else 'replay',
-            model=model.model_name if model else 'controlled-replay',
+            mode='model' if model_name else 'replay',
+            model=model_name or 'controlled-replay',
             model_quality_assessed=False,
             manual_review_required=['query relevance', 'claim support and uncertainty', 'answer usefulness'],
             scope='Fixed web fixtures; no live search reliability assessment. Automatic checks are lexical, not semantic.',

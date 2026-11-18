@@ -76,3 +76,14 @@ def test_good_retrieval_cannot_hide_wrong_answer(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert all(report['cases'][0]['evidence_checks'].values())
     assert report['cases'][0]['answer_checks']['required_content'] is False
+
+
+def test_langfuse_experiment_requires_project_keys(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, 'manage.py', 'evaluate_research', '--langfuse', '--output', str(tmp_path / 'report.json')],
+        env={**os.environ, 'LANGFUSE_PUBLIC_KEY': '', 'LANGFUSE_SECRET_KEY': ''},
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 1
+    assert 'Configure both Langfuse project keys in .env' in result.stderr
+    assert not (tmp_path / 'report.json').exists()

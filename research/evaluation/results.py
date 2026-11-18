@@ -37,3 +37,5 @@ class EvaluationReport:
     scope: str
     passed: bool
     cases: list[CaseResult]
+    experiment_url: str | None = None
+    dataset_name: str | None = None

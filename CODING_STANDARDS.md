@@ -20,6 +20,7 @@ The user prefers class-based, object-oriented Python. Apply this to the applicat
 
 - Test observable behavior through public interfaces. Tests should continue to describe the same behavior when internal structure changes.
 - Keep real subscription integration checks separate from controlled model/HTTP tests.
+- Prefer integrated tools for evaluations: use Langfuse datasets, experiment runners, and scores for model evaluation. Keep custom code focused on application-specific fixtures and checks, and pytest for deterministic regressions. Start with coarse end-to-end checks; add stage-specific evaluators when observed failures justify them.
 - Keep credentials outside source control and diagnostic output. Use synthetic data in controlled tests.
 - Run typechecking and relevant tests after refactoring. Preserve the agreed milestone scope.
 

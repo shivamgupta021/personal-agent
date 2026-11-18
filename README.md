@@ -102,11 +102,13 @@ Run the real research loop against fixed, fictional web fixtures:
 
 ```sh
 uv run python manage.py evaluate_research
+uv run python manage.py evaluate_research --langfuse
 uv run python manage.py evaluate_research --live-model --output .local/evaluations/model.json
 ```
 
 The first command replays controlled model responses to check orchestration and the evaluator.
-The second consumes subscription usage with the configured model (default GPT-6.2 Sol), while
+The `--langfuse` command publishes a replay experiment without subscription usage.
+The `--live-model` command runs a Langfuse experiment using the subscription model (default GPT-6.2 Sol), while
 web responses remain fixed. Neither command measures live Firecrawl reliability. Normal
 `research` remains the separate end-to-end smoke check. Query planners stay disabled.
 
@@ -130,4 +132,21 @@ opening excerpts even when later evidence allows the answer to pass.
 
 Langfuse uses the normal tracing settings, including content opt-in. Evaluation retrieval
 spans represent fixtures, not actual Firecrawl requests; the fictional questions distinguish
-these runs from real research. No evaluation results are uploaded as Langfuse scores yet.
+these runs from real research. The Langfuse SDK 5.2.0 owns experiment execution, dataset linkage, and score publication.
+Both experiment modes require the existing Langfuse keys in `.env`; ordinary replay stays offline.
+The command prints `experiment_url` and `dataset_name` in its JSON report. Open that URL,
+compare experiments, and inspect each item's output, scores, and linked trace.
+
+The hosted dataset uses the question as input, the expected checks as expected output,
+and fixed web fixtures as metadata. Its name includes a suite-content hash; edits create
+another dataset rather than silently changing comparisons. Repeated runs reuse stable item IDs.
+These four fictional scenarios are a reviewable development baseline, not broad coverage.
+
+Three SDK code scores are attached to each complete research execution:
+`evidence_checks_pass`, `answer_checks_pass`, and `research_checks_pass` (including execution
+failures). A value of 1 means those deterministic checks passed, not that semantic quality
+was established. Failed-check names appear in score comments. These evaluator functions
+run locally through the SDK; they are not server-side automatic evaluators for production traffic.
+Stage-specific query, retrieval, selection, and synthesis scores are deferred.
+The SDK serializes evaluation inputs and outputs to Langfuse even if normal tracing content
+capture is off; use this command only with the approved synthetic fixture suite.
