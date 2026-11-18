@@ -15,6 +15,7 @@ DEBUG = False
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 INSTALLED_APPS = [
     'core.apps.CoreConfig',
+    'conversations.apps.ConversationsConfig',
     'subscriptions.apps.SubscriptionsConfig',
     'research.apps.ResearchConfig',
     'telegram_bot.apps.TelegramBotConfig',
@@ -22,7 +23,14 @@ INSTALLED_APPS = [
 ROOT_URLCONF = 'config.urls'
 WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'
-DATABASES = {'default': {'ENGINE': 'django.db.backends.dummy'}}
+DATABASES = {'default': {
+    'ENGINE': 'django.db.backends.postgresql',
+    'NAME': os.getenv('POSTGRES_DB', 'personal_agent'),
+    'USER': os.getenv('POSTGRES_USER', 'personal_agent'),
+    'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
+    'HOST': os.getenv('POSTGRES_HOST', '127.0.0.1'),
+    'PORT': os.getenv('POSTGRES_PORT', '55432'),
+}}
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 USE_TZ = True
 TIME_ZONE = 'Asia/Kolkata'

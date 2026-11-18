@@ -9,6 +9,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from core.commands import run_async
+from conversations.service import ConversationService
 from research.service import ResearchService
 from subscriptions.service import SubscriptionService
 from telegram_bot.client import TelegramClient
@@ -39,4 +40,4 @@ class Command(BaseCommand):
             base_url=f'https://api.telegram.org/bot{token}/', timeout=HTTP_TIMEOUT_SECONDS,
             follow_redirects=False,
         ) as client:
-            await TelegramService(TelegramClient(client), state, owner_id, research.run).run()
+            await TelegramService(TelegramClient(client), state, owner_id, ConversationService(f'{identity}:{owner_id}', research).run).run()

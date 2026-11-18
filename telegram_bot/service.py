@@ -1,4 +1,4 @@
-"""Owner-only standalone research requests, serialized by the polling loop."""
+"""Owner-only conversation requests, serialized by the polling loop."""
 
 import asyncio
 import logging
@@ -39,9 +39,9 @@ class TelegramService:
                 continue
             if question.startswith('/'):
                 await self.client.send(self.owner_id,
-                    'Send a standalone public research question. I have no conversation memory. '
+                    'Send a public research question or follow-up. Completed conversation history survives restarts. '
                     'If a request is interrupted or no reply arrives, send it again. '
-                    'Use public topics only; configured Langfuse tracing may capture content.')
+                    'You can ask to delete this entire conversation. Use public topics only; configured Langfuse tracing may capture content.')
                 continue
             logger.info('Research request accepted')
             try:

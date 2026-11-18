@@ -192,3 +192,53 @@ service and Telegram accepted the reply. Langfuse trace
 one search (five sources, zero failed queries), and one 2,342-character page read.
 Content capture was disabled for that run. This verifies delivery through the API and trace
 ingestion; the owner also confirmed receiving the answer and source link in Telegram.
+
+### Persistent Telegram conversations (milestone #23)
+
+Configure the dedicated application PostgreSQL database using the `POSTGRES_*` values
+in `.env` (loaded automatically). Apply migrations, then run the bot:
+
+```sh
+uv run python manage.py migrate
+uv run python manage.py telegram
+```
+
+Completed turns now survive process restarts. Send a public research question followed
+by a question referring to its answer. Restart the bot and ask another follow-up.
+The bot still processes one owner message at a time; interruption requires manual
+resend. A completed answer is saved before delivery, so a failed Telegram send does
+not erase it. Interrupted model runs are not appended as completed turns.
+
+This milestone has no compaction or archival retrieval yet. A conservative 48,000-byte
+serialized request budget includes message history, tool definitions, instructions,
+and 8,000 units of framing/output headroom; output is capped at 4,000 tokens. Bytes
+are a pessimistic proxy rather than an exact provider tokenizer. The guard runs before
+every model call, including after tool results. When exceeded, it reports the limit
+and leaves saved history intact. Automatic compaction follows in #24.
+
+Ask **“Delete this entire conversation.”** to remove local conversation history.
+This is a deletion control, not the normal mechanism for managing context length.
+Associated Langfuse traces are submitted for asynchronous deletion after local trace
+export has been flushed. The reply distinguishes local removal from remote cleanup.
+Say **“retry trace cleanup”** to retry without invoking the model or re-exporting old
+content. Content-free trace IDs remain available for repeated cleanup because a 404
+before delayed ingestion is not proof of final deletion. This does not erase Telegram,
+provider, or independently made backup copies. Targeted forgetting arrives in #26.
+
+Run repeatable real-model conversation experiments after prompt/model changes:
+
+```sh
+uv run python manage.py evaluate_conversation
+```
+
+The command publishes synthetic follow-up, correction, and ambiguity cases to a
+versioned Langfuse dataset, creates a new experiment, prints answers and its URL,
+and exits unsuccessfully when coarse checks fail. These are SDK evaluators, not
+server-side scheduled evaluators. Inspect outputs manually for semantic quality;
+substring checks are not a guarantee of correct recall. Synthetic evaluation
+conversations remain in the application database for inspection and are separate
+from the owner's Telegram conversation.
+
+Database tests use Django's isolated `test_personal_agent` database; the development
+role needs permission to create a test database. No test should point at the live
+application database as its test database.

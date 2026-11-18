@@ -1,6 +1,15 @@
 """Main research agent routing to query planners and evidence-reading tools."""
 
+from collections.abc import Awaitable, Callable
+
 from pydantic_ai import Agent, Tool
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.run import AgentRunResult
+from pydantic_ai.toolsets import FunctionToolset
+
+from conversations.budget import ConversationBudget
+from conversations.constants import MAX_OUTPUT_TOKENS
+from conversations.prompts import CONVERSATION_INSTRUCTIONS
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
@@ -44,3 +53,16 @@ class ResearchAgent:
             timeout=constants.RUN_TIMEOUT_SECONDS,
         )
         return result.output
+
+    async def run_turn(self, message: str, history: list[ModelMessage],
+                       forget: Callable[[], Awaitable[str]]) -> AgentRunResult[str]:
+        return await self.agent.run(
+            message, message_history=history,
+            instructions=CONVERSATION_INSTRUCTIONS,
+            capabilities=[ConversationBudget()],
+            toolsets=[FunctionToolset(tools=[Tool(forget, name='forget_conversation')])],
+            usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS,
+                                     tool_calls_limit=constants.MAX_TOOL_CALLS),
+            model_settings={'max_tokens': MAX_OUTPUT_TOKENS},
+            timeout=constants.RUN_TIMEOUT_SECONDS,
+        )

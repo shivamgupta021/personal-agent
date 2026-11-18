@@ -53,11 +53,11 @@ class Tracing:
                     'enabled' if settings.LANGFUSE_CAPTURE_CONTENT else 'disabled')
 
     @contextmanager
-    def operation(self, name: str, inputs: dict[str, Any]) -> Iterator[Span]:
+    def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever') -> Iterator[Span]:
         provider = self._provider or NoOpTracerProvider()
         with provider.get_tracer('personal-agent.retrieval').start_as_current_span(
             name, record_exception=False, set_status_on_exception=False,
-            attributes={'langfuse.observation.type': 'retriever'},
+            attributes={'langfuse.observation.type': kind},
         ) as span:
             if settings.LANGFUSE_CAPTURE_CONTENT:
                 span.set_attribute('langfuse.observation.input', json.dumps(inputs))
@@ -73,13 +73,16 @@ class Tracing:
         if 'error' in output:
             span.set_status(StatusCode.ERROR)
 
-    def flush(self) -> None:
+    def flush(self) -> bool:
         if self._provider is not None:
             try:
                 if not self._provider.force_flush(timeout_millis=int(settings.LANGFUSE_TIMEOUT_SECONDS * 1000)):
                     logger.warning('Trace export did not finish before its deadline')
+                    return False
             except Exception:
                 logger.warning('Trace export unavailable; application result is unaffected')
+                return False
+        return True
 
     def shutdown(self) -> None:
         if self._provider is not None:
