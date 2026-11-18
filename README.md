@@ -191,4 +191,4 @@ service and Telegram accepted the reply. Langfuse trace
 `daa396856f5813404569ea7be406760a` recorded 15.669 seconds, three model generations,
 one search (five sources, zero failed queries), and one 2,342-character page read.
 Content capture was disabled for that run. This verifies delivery through the API and trace
-ingestion; the owner's visual check of the answer/citation is separate.
+ingestion; the owner also confirmed receiving the answer and source link in Telegram.
