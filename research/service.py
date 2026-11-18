@@ -1,7 +1,10 @@
 """Compose the real research dependencies for one application request."""
 
+from collections.abc import Mapping
+
 import httpx2
 from django.conf import settings
+from pydantic_ai.models import Model
 
 from research.agent import ResearchAgent
 from research.tools.firecrawl import Firecrawl
@@ -23,7 +26,16 @@ class ResearchService:
             httpx2.AsyncClient(base_url=settings.FIRECRAWL_BASE_URL,
                               headers=headers, follow_redirects=False) as client,
         ):
-            return await ResearchAgent(
-                models['main'], Firecrawl(client), models.get('simple'), models.get('complex'),
-                use_query_planners=use_query_planners,
-            ).run(message)
+            return await self.run_with_dependencies(
+                message, models, Firecrawl(client), use_query_planners=use_query_planners,
+            )
+
+    @staticmethod
+    async def run_with_dependencies(
+        message: str, models: Mapping[str, Model], firecrawl: Firecrawl, *, use_query_planners: bool = False,
+    ) -> str:
+        """Share agent invocation with evaluations that supply controlled external boundaries."""
+        return await ResearchAgent(
+            models['main'], firecrawl, models.get('simple'), models.get('complex'),
+            use_query_planners=use_query_planners,
+        ).run(message)

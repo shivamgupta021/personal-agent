@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from research.evaluation.constants import MAX_EVIDENCE_CHARACTERS, MAX_READ_CALLS, MIN_DISTINCT_QUERIES, MIN_SEARCHES
+
 
 class ReplayStep(BaseModel):
     tool: Literal['search', 'read_page'] | None = None
@@ -17,10 +19,10 @@ class Expectations(BaseModel):
     answer_contains: list[str] = Field(default_factory=list)
     answer_excludes: list[str] = Field(default_factory=list)
     citations: list[str] = Field(default_factory=list)
-    min_searches: int = 1
-    min_distinct_queries: int = 1
-    max_read_calls: int = 3
-    max_evidence_characters: int = 32_000
+    min_searches: int = MIN_SEARCHES
+    min_distinct_queries: int = MIN_DISTINCT_QUERIES
+    max_read_calls: int = MAX_READ_CALLS
+    max_evidence_characters: int = MAX_EVIDENCE_CHARACTERS
     search_failure: bool = False
 
 

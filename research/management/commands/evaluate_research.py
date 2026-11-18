@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 
 from core.commands import run_async
 from research.evaluation.runner import ResearchEvaluation
+from research.evaluation.results import EvaluationReport
 from research.evaluation.schema import EvaluationSuite
 from subscriptions.constants import DEFAULT_MODEL
 from subscriptions.service import SubscriptionService
@@ -29,15 +31,15 @@ class Command(BaseCommand):
         except (OSError, ValidationError):
             raise CommandError('Could not load a valid evaluation suite.') from None
         report = run_async(self._evaluate(suite, options))
-        encoded = json.dumps(report, indent=2)
+        encoded = json.dumps(asdict(report), indent=2)
         output: Path = options['output']
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(encoded + '\n')
         self.stdout.write(encoded)
-        if not report['passed']:
+        if not report.passed:
             raise CommandError('Evaluation checks failed; inspect the report.')
 
-    async def _evaluate(self, suite: EvaluationSuite, options: dict[str, Any]) -> dict[str, Any]:
+    async def _evaluate(self, suite: EvaluationSuite, options: dict[str, Any]) -> EvaluationReport:
         evaluator = ResearchEvaluation()
         if options['live_model']:
             async with SubscriptionService(options['state_dir']).model(options['model']) as model:
