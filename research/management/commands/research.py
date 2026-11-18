@@ -16,7 +16,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument('message')
-        parser.add_argument('--model', default=DEFAULT_MODEL)
+        parser.add_argument('--experimental-query-planners', action='store_true',
+                            help='Opt into the parked simple/complex planner experiment.')
+        parser.add_argument('--model', default=DEFAULT_MODEL, help=f'Model slug (default: {DEFAULT_MODEL}).')
         parser.add_argument('--state-dir', type=Path, default=settings.SUBSCRIPTION_STATE_DIR)
 
     def handle(self, *args: Any, **options: Any) -> str:
@@ -24,4 +26,6 @@ class Command(BaseCommand):
         if not message or len(message) > MAX_MESSAGE_CHARACTERS:
             raise CommandError(f'Provide a public question of 1–{MAX_MESSAGE_CHARACTERS} characters.')
         service = ResearchService(SubscriptionService(options['state_dir']))
-        return run_async(service.run(message, options['model']))
+        return run_async(service.run(
+            message, options['model'], use_query_planners=options['experimental_query_planners'],
+        ))

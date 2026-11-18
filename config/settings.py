@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from subscriptions.constants import DEFAULT_MODEL
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env', override=False)
@@ -25,6 +26,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 USE_TZ = True
 TIME_ZONE = 'Asia/Kolkata'
 
+SIMPLE_QUERY_MODEL = os.getenv('SIMPLE_QUERY_MODEL', DEFAULT_MODEL)
+COMPLEX_QUERY_MODEL = os.getenv('COMPLEX_QUERY_MODEL', DEFAULT_MODEL)
 
 SUBSCRIPTION_STATE_DIR = BASE_DIR / '.local' / 'chatgpt'
 FIRECRAWL_BASE_URL = os.getenv('FIRECRAWL_BASE_URL', 'http://127.0.0.1:3002')

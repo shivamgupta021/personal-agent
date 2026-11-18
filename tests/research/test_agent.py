@@ -29,9 +29,11 @@ def test_research_searches_reads_and_answers_with_fresh_history(caplog: pytest.L
             'metadata': {'sourceURL': 'https://example.com/returns'}}})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if info.output_tools:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'queries': ['Example returns policy']})])
         results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
         if not results:
-            return ModelResponse(parts=[ToolCallPart('search', {'queries': ['Example returns policy']})])
+            return ModelResponse(parts=[ToolCallPart('search_simple', {'question': 'Example returns policy'})])
         if len(results) == 1:
             assert 'https://example.com/returns' in str(results[0].content)
             return ModelResponse(parts=[ToolCallPart('read_page', {'url': 'https://example.com/returns'})])
@@ -41,7 +43,7 @@ def test_research_searches_reads_and_answers_with_fresh_history(caplog: pytest.L
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            agent = ResearchAgent(FunctionModel(model), Firecrawl(client))
+            agent = ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True)
             for _ in range(2):
                 answer = await agent.run('Find the Example returns policy')
                 assert '14 days' in answer
@@ -64,14 +66,16 @@ def test_research_stops_before_exceeding_execution_budget(max_requests: int, max
         return httpx2.Response(200, json={'success': True, 'data': {'web': []}})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['public topic']})])
+        if info.output_tools:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'queries': ['public topic']})])
+        return ModelResponse(parts=[ToolCallPart('search_simple', {'question': 'public topic'})])
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            agent = ResearchAgent(FunctionModel(model), Firecrawl(client))
+            agent = ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True)
             with pytest.raises(UsageLimitExceeded):
                 await agent.run('Research a public topic')
-        assert len(calls) == (0 if max_tools == 0 else 1)
+        assert calls == []  # Parent limit prevents delegation or the planner's request.
 
     asyncio.run(exercise())
 
@@ -85,7 +89,7 @@ def test_research_timeout_stops_the_run(monkeypatch: pytest.MonkeyPatch) -> None
     async def exercise() -> None:
         async with httpx2.AsyncClient() as client:
             with pytest.raises(TimeoutError):
-                await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Topic')
+                await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('Topic')
 
     asyncio.run(exercise())
 
@@ -120,7 +124,7 @@ def test_web_failures_are_returned_to_the_model_without_raw_errors(failure: str)
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            answer = await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Find the policy')
+            answer = await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('Find the policy')
             assert answer == 'I could not verify this page.'
         if failure in {'private_url', 'malformed_url'}:
             assert requests == []
@@ -146,7 +150,7 @@ def test_agent_can_read_later_sections_of_a_long_page() -> None:
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            assert await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Find deadlines') == 'Found the deadline section.'
+            assert await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('Find deadlines') == 'Found the deadline section.'
 
     asyncio.run(exercise())
 
@@ -160,7 +164,7 @@ def test_rejected_credential_url_is_not_printed(caplog: pytest.LogCaptureFixture
 
     async def exercise() -> None:
         async with httpx2.AsyncClient() as client:
-            await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Read a page')
+            await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('Read a page')
 
     asyncio.run(exercise())
     assert 'secret-password' not in caplog.text
@@ -180,11 +184,11 @@ def test_planned_queries_are_searched_once_and_sources_are_deduplicated() -> Non
         ]}})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if info.output_tools:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'queries': ['official policy', 'eligibility exceptions', 'support procedure']})])
         results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
         if not results:
-            return ModelResponse(parts=[ToolCallPart('search', {
-                'queries': ['official policy', 'eligibility exceptions', 'support procedure'],
-            })])
+            return ModelResponse(parts=[ToolCallPart('search_complex', {'question': 'Find policy, eligibility, and support'})])
         content = results[-1].content
         assert isinstance(content, dict)
         sources = content.get('sources')
@@ -194,7 +198,7 @@ def test_planned_queries_are_searched_once_and_sources_are_deduplicated() -> Non
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            answer = await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Find policy and support options')
+            answer = await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('Find policy and support options')
             assert 'support search was unavailable' in answer
         assert queries == ['official policy', 'eligibility exceptions', 'support procedure']
 
@@ -209,12 +213,14 @@ def test_query_batch_limit_prevents_excess_web_requests() -> None:
         return httpx2.Response(200, json={'success': True, 'data': {'web': []}})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart('search', {'queries': ['a', 'b', 'c', 'd']})])
+        if info.output_tools:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'queries': ['a', 'b', 'c', 'd']})])
+        return ModelResponse(parts=[ToolCallPart('search_complex', {'question': 'Research four aspects'})])
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
             with pytest.raises(UnexpectedModelBehavior):
-                await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Search')
+                await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('Search')
         assert requests == []
 
     asyncio.run(exercise())
@@ -232,9 +238,11 @@ def test_empty_search_distinguishes_explicit_results_from_ambiguous_response(
         return httpx2.Response(200, json={'success': True, 'data': data})
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if info.output_tools:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'queries': ['narrow public topic']})])
         results = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
         if not results:
-            return ModelResponse(parts=[ToolCallPart('search', {'queries': ['narrow public topic']})])
+            return ModelResponse(parts=[ToolCallPart('search_simple', {'question': 'narrow public topic'})])
         content = results[-1].content
         assert isinstance(content, dict)
         assert content.get('sources') == []
@@ -244,6 +252,6 @@ def test_empty_search_distinguishes_explicit_results_from_ambiguous_response(
 
     async def exercise() -> None:
         async with httpx2.AsyncClient(base_url='http://firecrawl', transport=httpx2.MockTransport(web)) as client:
-            assert await ResearchAgent(FunctionModel(model), Firecrawl(client)).run('Research') == 'No matching sources were found.'
+            assert await ResearchAgent(FunctionModel(model), Firecrawl(client), use_query_planners=True).run('Research') == 'No matching sources were found.'
 
     asyncio.run(exercise())

@@ -29,13 +29,22 @@ class SubscriptionService:
 
     @asynccontextmanager
     async def model(self, name: str = constants.DEFAULT_MODEL) -> AsyncIterator[OpenAIResponsesModel]:
+        async with self.models({'main': name}) as models:
+            yield models['main']
+
+    @asynccontextmanager
+    async def models(self, names: dict[str, str]) -> AsyncIterator[dict[str, OpenAIResponsesModel]]:
+        """Share one authenticated client and session lock across the agent tree."""
         async with self._client() as client:
-            yield OpenAIResponsesModel(
-                name, provider=OpenAIChatGPTProvider(openai_client=client),
-                settings=OpenAIResponsesModelSettings(
-                    openai_store=False, timeout=constants.MODEL_TIMEOUT_SECONDS,
-                ),
-            )
+            provider = OpenAIChatGPTProvider(openai_client=client)
+            yield {
+                role: OpenAIResponsesModel(
+                    name, provider=provider,
+                    settings=OpenAIResponsesModelSettings(
+                        openai_store=False, timeout=constants.MODEL_TIMEOUT_SECONDS,
+                    ),
+                ) for role, name in names.items()
+            }
 
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[AsyncOpenAI]:

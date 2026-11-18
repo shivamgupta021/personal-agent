@@ -1,22 +1,37 @@
-"""One research agent; Pydantic AI owns the model/tool loop."""
+"""Main research agent routing to query planners and evidence-reading tools."""
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, Tool
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
 from research import constants
 from research.tools.firecrawl import Firecrawl
-from research.prompts import RESEARCH_INSTRUCTIONS
+from research.tools.search import ResearchSearch
+from research.planning.agent import PlanningMode, QueryPlanner
+from research.prompts import DIRECT_RESEARCH_INSTRUCTIONS, DELEGATED_RESEARCH_INSTRUCTIONS
 
 
 class ResearchAgent:
-    def __init__(self, model: Model, firecrawl: Firecrawl) -> None:
+    def __init__(
+        self, model: Model, firecrawl: Firecrawl,
+        simple_model: Model | None = None, complex_model: Model | None = None,
+        *, use_query_planners: bool = False,
+    ) -> None:
+        tools = [Tool(firecrawl.search), Tool(firecrawl.read_page)]
+        instructions = DIRECT_RESEARCH_INSTRUCTIONS
+        if use_query_planners:
+            search = ResearchSearch(
+                firecrawl, QueryPlanner(simple_model or model, PlanningMode.SIMPLE),
+                QueryPlanner(complex_model or model, PlanningMode.COMPLEX),
+            )
+            tools = [Tool(search.search_simple), Tool(search.search_complex), Tool(firecrawl.read_page)]
+            instructions = DELEGATED_RESEARCH_INSTRUCTIONS
         self.agent: Agent[None, str] = Agent(
             model,
-            instructions=RESEARCH_INSTRUCTIONS,
+            instructions=instructions,
             name='research',
             retries=constants.AGENT_VALIDATION_RETRIES,
-            tools=[firecrawl.search, firecrawl.read_page],
+            tools=tools,
         )
 
     async def run(self, message: str) -> str:
