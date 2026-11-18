@@ -1,6 +1,6 @@
 # Personal Agent
 
-A real terminal research agent using your ChatGPT subscription, Pydantic AI, and local Firecrawl. Give it a public research question; it chooses searches and page reads, receives their results, and returns a sourced answer. The handwritten milestone 1 loop remains available for comparison.
+A real terminal research agent using your ChatGPT subscription, Pydantic AI, and local Firecrawl. Give it a public research question; it chooses searches and page reads, receives their results, and returns a sourced answer.
 
 ## Run it
 
@@ -24,7 +24,7 @@ Read these in order:
 
 1. `ResearchAgent.run()` in `src/personal_agent/research.py`: starts a fresh run, prints each model-request step, observes requested tools, returns the final answer, and enforces limits. This is the main learning entry point.
 2. `Firecrawl.search()` and `Firecrawl.read_page()` in `src/personal_agent/firecrawl.py`: actual HTTP requests to your service. Tools return compact evidence, URLs, retrieval timestamps, and sanitized errors. Long pages expose `next_offset`, which the model can use on another read.
-3. `LearningApp.research()` in `src/personal_agent/__main__.py`: connects the subscription model, local tools, and optional tracing.
+3. `ResearchApp.research()` in `src/personal_agent/__main__.py`: connects the subscription model, local tools, and optional tracing.
 4. `LangfuseTrace.send()` in `src/personal_agent/telemetry.py`: the entire outbound trace payload is visible here. It receives usage counts, tool names, timing, and a fixed status—not message history or tool payloads.
 
 The flow is:
@@ -37,7 +37,7 @@ Your question → model request → tool call chosen by model
 
 Pydantic AI owns tool schemas, argument validation, dispatch, message history, and the model/tool cycle. Our code owns available tools, instructions, authentication, budgets, presentation, and tracing. `agent.iter()` lets us observe the real execution without rebuilding that framework loop. Printed steps describe observable execution, not the model's private reasoning.
 
-The research command uses no scripted answers. Controlled models in `tests/test_research.py` make regression checks repeatable; they do not establish research quality. The old `demo` command and `demo-001` order are synthetic and can wait if you are reviewing the usable agent. See [the original handwritten lesson](docs/learning/handwritten-loop.md) for its walkthrough.
+The research command uses no scripted answers. Controlled models in `tests/test_research.py` make regression checks repeatable; they do not establish research quality.
 
 ## Limits and failures
 

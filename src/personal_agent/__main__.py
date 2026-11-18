@@ -5,9 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from openai import AsyncOpenAI
-
 import httpx2
+from openai import AsyncOpenAI
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 from pydantic_ai.providers.openai_chatgpt import OpenAIChatGPTProvider
 
@@ -15,43 +14,28 @@ from personal_agent.firecrawl import Firecrawl
 from personal_agent.research import ResearchAgent
 from personal_agent.telemetry import LangfuseTrace
 from personal_agent.auth import SubscriptionSession
-from personal_agent.loop import Agent
-from personal_agent.models import OfflineModel
-from personal_agent.subscription import ResponsesModel
-
-DEMO_MESSAGE = "Look up the synthetic order demo-001 and tell me its amount and currency."
 
 
-class LearningApp:
-    """Compose the lesson components and present their results in the terminal."""
+class ResearchApp:
+    """Connect subscription authentication and research to the terminal."""
 
     async def run_command(self, command: str, directory: Path, model_name: str | None,
                           message: str | None = None) -> int:
-        if command == "demo":
-            print("OFFLINE: scripted responses, no network or model usage. Synthetic data only.")
-            await Agent(OfflineModel()).run(DEMO_MESSAGE)
-        else:
-            session = SubscriptionSession(directory)
-            with session.locked():
-                if command == "login":
-                    await session.login()
+        session = SubscriptionSession(directory)
+        with session.locked():
+            if command == "login":
+                await session.login()
+                return 0
+            await session.credentials.load()
+            async with session.provider().client.with_options(max_retries=0, timeout=30) as client:
+                if command == "models":
+                    catalog = await client.get("/models", cast_to=dict[str, Any])
+                    for model in catalog.get("models", []):
+                        if model.get("visibility") == "list":
+                            print(f"{model['slug']}  {model.get('display_name', '')}")
                     return 0
-                await session.credentials.load()
-                async with session.provider().client.with_options(max_retries=0, timeout=30) as client:
-                    if command == "models":
-                        catalog = await client.get("/models", cast_to=dict[str, Any])
-                        for model in catalog.get("models", []):
-                            if model.get("visibility") == "list":
-                                print(f"{model['slug']}  {model.get('display_name', '')}")
-                        return 0
-                    assert model_name is not None
-                    if command == "research":
-                        assert message is not None
-                        await self.research(client, model_name, message)
-                        return 0
-                    print("LIVE: ChatGPT subscription usage. Synthetic data only; no external actions.")
-                    await Agent(ResponsesModel(client, model_name)).run(DEMO_MESSAGE)
-        print("\nStopped: answered")
+                assert model_name is not None and message is not None
+                await self.research(client, model_name, message)
         return 0
 
     async def research(self, client: AsyncOpenAI, model_name: str, message: str) -> None:
@@ -81,14 +65,14 @@ class LearningApp:
 
     def run(self) -> int:
         os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
-        parser = argparse.ArgumentParser(description="Learn the loop or research a public topic with local Firecrawl")
-        parser.add_argument("command", choices=["demo", "login", "models", "live", "research"])
+        parser = argparse.ArgumentParser(description="Research a public topic with local Firecrawl")
+        parser.add_argument("command", choices=["login", "models", "research"])
         parser.add_argument("message", nargs="?", help="Public research question (research only)")
         parser.add_argument("--model", help="Account-specific slug from the models command")
         parser.add_argument("--state-dir", type=Path, default=Path(".local/chatgpt"))
         args = parser.parse_args()
-        if args.command in {"live", "research"} and not args.model:
-            parser.error("live/research requires --model; use models to discover available slugs")
+        if args.command == "research" and not args.model:
+            parser.error("research requires --model; use models to discover available slugs")
         if args.command == 'research' and (not args.message or not args.message.strip() or len(args.message) > 8000):
             parser.error('research requires a public question of 1–8000 characters')
         if args.command != 'research' and args.message is not None:
@@ -103,7 +87,7 @@ class LearningApp:
             safe_messages = {
                 "execution_limit", "research_failed",
                 "Set both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY.",
-                "request_limit", "tool_limit", "timeout", "provider_error", "invalid_response",
+                "timeout",
                 "Run the login command first.",
                 "Another command is using this subscription session.",
                 "Could not open the browser. Run login from a desktop terminal.",
@@ -118,7 +102,7 @@ class LearningApp:
 
 
 def main() -> int:
-    return LearningApp().run()
+    return ResearchApp().run()
 
 
 if __name__ == "__main__":

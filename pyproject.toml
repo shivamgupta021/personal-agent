@@ -1,7 +1,7 @@
 [project]
 name = "personal-agent"
 version = "0.1.0"
-description = "An inspectable model/tool loop for learning personal assistants"
+description = "A terminal research agent using ChatGPT subscription access and local Firecrawl"
 requires-python = ">=3.12"
 dependencies = [
     "httpx2==2.16.2",
