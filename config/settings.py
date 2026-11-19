@@ -60,7 +60,7 @@ LOGGING = {
     'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'console'}},
     'loggers': {
         name: {'handlers': ['console'], 'level': 'INFO', 'propagate': False}
-        for name in ('core', 'research', 'subscriptions', 'telegram_bot')
+        for name in ('core', 'research', 'subscriptions', 'telegram_bot', 'grievances')
     },
 }
 os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
