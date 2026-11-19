@@ -321,8 +321,9 @@ parcel code, but keep my comparison language.” The agent verifies current inte
 proposes exact-quote edits, checks that unrelated prose is preserved, and commits
 atomically. A successful edit ends the old run so stale context cannot be saved back.
 
-This removes derived summaries/tool copies and rebuilds bounded recent context from
-sanitized originals; other retained originals remain available through recall. It
+This invalidates derived summaries, redacts matching text and tool data, and rebuilds
+bounded recent context from sanitized originals. Unrelated tool evidence and prose
+are retained; other originals remain available through recall. It
 conservatively requests deletion of prior traces for that conversation because they
 may repeat its context. Local success and pending trace cleanup are reported separately.
 Say “retry trace cleanup” to retry asynchronous or failed Langfuse deletion. External
