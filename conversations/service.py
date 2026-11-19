@@ -13,6 +13,7 @@ from conversations.constants import DELETE_CONVERSATION_PHRASES
 from conversations.store import ConversationStore, ContextChanged
 from conversations.facts import FactCleanup, ConversationEdited, ConversationEditRejected
 from core.tracing import tracing
+from preferences.service import PreferenceReply
 
 
 class ConversationRunner(Protocol):
@@ -58,6 +59,8 @@ class ConversationService:
                 return result.output
         except ConversationEditRejected as rejected:
             return 'Nothing changed: ' + str(rejected)
+        except PreferenceReply as reply:
+            return str(reply)
         except ConversationEdited as edited:
             cleaned = True
             confirmation = 'Fact updated locally. ' if edited.action == 'correct' else 'Selected information forgotten locally. '

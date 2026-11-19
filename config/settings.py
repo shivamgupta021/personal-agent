@@ -16,6 +16,7 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 INSTALLED_APPS = [
     'core.apps.CoreConfig',
     'conversations.apps.ConversationsConfig',
+    'preferences.apps.PreferencesConfig',
     'subscriptions.apps.SubscriptionsConfig',
     'research.apps.ResearchConfig',
     'telegram_bot.apps.TelegramBotConfig',
