@@ -14,6 +14,9 @@ from core.turns import OwnerTurn
 from core.tracing import tracing
 from grievances import constants
 from grievances.drafts import DraftService
+from grievances.policy import PolicyResearchService, PublicResearchBoundary
+from grievances.policy_store import PolicyStateChanged, PolicyStore
+from research.tools.firecrawl import Firecrawl
 from grievances.prompts import INTAKE_INSTRUCTIONS, SELECTED_INTAKE_INSTRUCTIONS
 from grievances.schema import IntakeAction
 from grievances.store import CaseStore
@@ -25,8 +28,9 @@ from conversations.memory import ConversationMemoryRunner
 
 
 class ApplicationService:
-    def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None) -> None:
+    def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None, *, firecrawl: Firecrawl | None = None) -> None:
         self.store = CaseStore()
+        self.firecrawl = firecrawl
         self.model = model
         self.public_run = public_run
         self.agent: Agent[None, IntakeAction] = Agent(model, output_type=IntakeAction,
@@ -48,9 +52,13 @@ class ApplicationService:
             return 'Please send a shorter case message. Nothing changed.'
         selection = await self.store.selection(turn.owner_id, turn.conversation_id)
         current = await self.store.get_case(turn.owner_id, selection.case_id) if selection.case_id else None
+        brief = await PolicyStore().latest_brief(turn.owner_id, current.id) if current else None
+        research_status = {'reviewed': brief is not None, 'confirmed': bool(brief and brief.confirmed),
+                           'revision': brief.revision if brief else None,
+                           'matches_current_facts': bool(brief and current and brief.fact_revision == current.revision)}
         cases = await self.store.list_cases(turn.owner_id)
         preferences = await PreferenceStore().list(turn.owner_id)
-        payload = {'current_request': turn.text,
+        payload = {'current_request': turn.text, 'research_status': research_status,
                    'selected_case': {'id': current.id} if current else None,
                    'case_labels': [asdict(case) for case in cases],
                    'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences]}
@@ -62,7 +70,7 @@ class ApplicationService:
             result = await self.agent.run(encoded, usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                                           timeout=constants.RUN_TIMEOUT_SECONDS)
         action = result.output
-        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft') and current:
+        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research') and current:
             messages: list[str] = []
             size = len(json.dumps(current.facts)) + len(turn.text)
             for message in reversed(current.messages):
@@ -70,7 +78,7 @@ class ApplicationService:
                     break
                 messages.insert(0, message)
                 size += len(message)
-            selected_payload = json.dumps({'current_request': turn.text,
+            selected_payload = json.dumps({'current_request': turn.text, 'research_status': research_status,
                 'selected_case': {'id': current.id, 'facts': current.facts, 'messages': messages},
                 'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences]})
             if len(selected_payload) > constants.MAX_CONTEXT_CHARS:
@@ -79,7 +87,7 @@ class ApplicationService:
                 action = (await self.agent.run(selected_payload, instructions=SELECTED_INTAKE_INSTRUCTIONS, usage=usage,
                     usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                     timeout=constants.RUN_TIMEOUT_SECONDS)).output
-            if action.action not in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'clarify'):
+            if action.action not in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'clarify'):
                 return 'Please clarify the intended case action. Nothing changed.'
         if any(f.quote not in turn.text or f.value not in f.quote for f in action.facts):
             return 'I could not verify the supplied facts. Nothing changed; please state them explicitly.'
@@ -91,8 +99,26 @@ class ApplicationService:
         if action.correction_quote and (action.correction_quote not in turn.text or not re.search(
                 r'\b(correct(?:ion)?|replace|change|update|amend)\b', action.correction_quote, re.IGNORECASE)):
             return 'Please explicitly state the correction. Nothing changed.'
-        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft') and action.case_id and action.case_id != selection.case_id:
+        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research') and action.case_id and action.case_id != selection.case_id:
             return 'Please explicitly select the intended case first. Nothing changed.'
+        if action.action in ('review_research', 'confirm_research', 'research'):
+            if current is None:
+                return 'Please select the intended case before policy research.'
+            if action.facts or action.correction_quote:
+                return 'Please save case fact changes separately before reviewing or researching public policies.'
+            policy_store = PolicyStore()
+            try:
+                if action.action == 'review_research':
+                    if action.public_brief is None or not await PublicResearchBoundary(turn.owner_id, self.store).validate_brief(action.public_brief):
+                        return 'Please supply only public company identity, product category, issue category, jurisdiction and the official HTTPS site root for review. No web request was sent.'
+                    return await policy_store.propose(turn, selection, current, action.public_brief)
+                if action.action == 'confirm_research':
+                    if not re.fullmatch(r'i confirm (?:these |the )?public research fields and (?:this |the )?official site[.!]?', turn.text.strip(), re.IGNORECASE):
+                        return 'To confirm the displayed values, explicitly say: I confirm these public research fields and this official site. Nothing was sent to the web.'
+                    return await policy_store.confirm(turn, selection, current)
+                return await PolicyResearchService(self.model, self.store, self.firecrawl).run(turn, selection, current, usage)
+            except PolicyStateChanged:
+                return 'Case facts, selection or public research fields changed. No research changes were saved; please review them again.'
         if action.action in ('draft', 'list_drafts', 'read_draft'):
             if current is None:
                 return 'Please select the intended case before requesting drafts.'

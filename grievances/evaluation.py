@@ -21,6 +21,7 @@ from core.tracing import tracing
 from core.turns import OwnerTurn
 from grievances.service import ApplicationService
 from subscriptions.service import SubscriptionService
+from research.tools.firecrawl import Firecrawl
 
 
 class ObservedModel(WrapperModel):
@@ -44,8 +45,9 @@ class IntakeScenario:
                 'It did not turn on when first tested on delivery day. I want a refund of INR 2,400. '
                 'Order reference: ORDER-ALPHA-Q7. I have a receipt and video, but have not uploaded either.')
 
-    def __init__(self, model: Model) -> None:
+    def __init__(self, model: Model, firecrawl: Firecrawl | None = None) -> None:
         self.model = ObservedModel(model)
+        self.firecrawl = firecrawl
         self.owner = f'evaluation-case-{uuid4().hex}'
         self.conversation = self.owner
         self.public_messages: list[str] = []
@@ -59,7 +61,7 @@ class IntakeScenario:
         return 'Public research boundary reached.'
 
     def service(self) -> ApplicationService:
-        return ApplicationService(self.model, self.public)
+        return ApplicationService(self.model, self.public, firecrawl=self.firecrawl)
 
     async def turn(self, message: str, *, delivery: str | None = None,
                    forbidden: tuple[str, ...] = ()) -> str:

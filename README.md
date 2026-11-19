@@ -416,3 +416,45 @@ This publishes a fresh `grievance-factual-drafts-v1` experiment. Inspect entire 
 version/current/outdated fields and individual checks. Scenarios cover corrections,
 incomplete facts, uncertain evidence, case isolation, requested deadlines/component
 charges and money-back wording. No web research or external sending is used.
+
+### Company policy research
+
+Policy research uses a separate reviewed public brief. It never sends the case transcript,
+order reference, name, address or correspondence to Firecrawl. Example turns after selecting
+an appropriate case (replace the example company/site with the real official site):
+
+1. “Review public research fields: company Example Home; product electrical appliance; issue defective item; jurisdiction India; official site https://www.example.com/.”
+2. Inspect the displayed values, then say “I confirm these public research fields and this official site.”
+3. “Research official policies for this case.”
+4. “Draft a refund email using the research.”
+
+Research builds three fixed-purpose queries from those public fields. It reads the confirmed
+site root and bounded observed links on that exact HTTPS origin. Search rank or a similar
+hostname cannot establish official status. A redirected origin needs a new reviewed anchor.
+Identity evidence and provenance are recorded as owner-confirmed, not independently certified.
+
+A researched draft preserves exact source quotations, URL/retrieval time and uncertainty in
+review notes. Explicit ISO effective dates can identify a purchase-time candidate; this does
+not establish eligibility. Undated, conflicting or missing terms remain uncertain. Research
+failure preserves factual drafting. Changing the reviewed company/site/jurisdiction invalidates
+older researched drafts; newly generated factual drafts omit superseded authority until the
+new brief is confirmed and researched. Prior versions are retained unchanged.
+
+The installed local Firecrawl build needed a destination-provenance fix. Setup, pinned image
+checks and rollback are documented in [infra/firecrawl/README.md](infra/firecrawl/README.md).
+Unpatched or unknown engines lack verified destination metadata and fail closed for policy
+verification; ordinary public `research` still works. Existing network protections remain
+Firecrawl's responsibility. Private case tracing stays metadata-only regardless of public
+content capture.
+
+```sh
+uv run python manage.py evaluate_grievances --policy
+uv run python manage.py evaluate_grievances --policy --scenario official_historical
+```
+
+These native Langfuse experiments use real model calls with fixed fictional HTTP pages and
+no live-web fallback. They cover dated versions, impostors, conflicts, missing historical terms,
+outages, injected instructions, actual outbound privacy and changes to reviewed authority.
+The optional scenario filter runs a focused subset on the same dataset. Compare prompt,
+fixture and evaluator hashes; manually read the quotations and final letter. Real Firecrawl
+connectivity/provenance is verified separately from these model-quality experiments.
