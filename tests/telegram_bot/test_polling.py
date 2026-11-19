@@ -39,7 +39,7 @@ def test_owner_receives_answer_and_other_users_never_reach_model(tmp_path: Path)
 
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://api.telegram.org/botTEST/', transport=httpx2.MockTransport(telegram)) as http:
-            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, research)
+            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (research) (turn.text), identity='test-bot:7')
             with service.state.locked():
                 for _ in updates:
                     await service.poll_once()
@@ -77,13 +77,13 @@ def test_restart_does_not_repeat_interrupted_research(tmp_path: Path) -> None:
 
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(boundary.respond)) as http:
-            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, interrupted)
+            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (interrupted) (turn.text), identity='test-bot:7')
             with service.state.locked():
                 try:
                     await service.poll_once()
                 except asyncio.CancelledError:
                     pass
-            restarted = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, interrupted)
+            restarted = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (interrupted) (turn.text), identity='test-bot:7')
             with restarted.state.locked():
                 await restarted.poll_once()
     asyncio.run(run())
@@ -101,7 +101,7 @@ def test_long_unicode_answer_preserves_citation_and_text(tmp_path: Path) -> None
 
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(boundary.respond)) as http:
-            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, research)
+            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (research) (turn.text), identity='test-bot:7')
             with service.state.locked():
                 await service.poll_once()
     asyncio.run(run())
@@ -120,7 +120,7 @@ def test_research_failure_returns_safe_message_and_is_not_replayed(tmp_path: Pat
 
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(boundary.respond)) as http:
-            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, research)
+            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (research) (turn.text), identity='test-bot:7')
             with service.state.locked():
                 await service.poll_once()
                 await service.poll_once()
@@ -142,7 +142,7 @@ def test_uncertain_send_is_not_retried_or_researched_again(tmp_path: Path) -> No
 
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(boundary.respond)) as http:
-            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, research)
+            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (research) (turn.text), identity='test-bot:7')
             with service.state.locked():
                 try:
                     await service.poll_once()
@@ -181,7 +181,7 @@ def test_start_command_explains_conversation_behavior_without_model(tmp_path: Pa
 
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http:
-            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, research)
+            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (research) (turn.text), identity='test-bot:7')
             with service.state.locked():
                 await service.poll_once()
     asyncio.run(run())
@@ -198,7 +198,7 @@ def test_invalid_bot_credentials_stop_polling_without_leaking_token(tmp_path: Pa
             base_url='https://telegram.invalid/botSECRET/',
             transport=httpx2.MockTransport(lambda request: httpx2.Response(401, json={'ok': False, 'description': 'SECRET'})),
         ) as http:
-            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, research)
+            service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (research) (turn.text), identity='test-bot:7')
             with pytest.raises(TelegramError) as caught:
                 await asyncio.wait_for(service.run(), timeout=0.1)
             assert 'SECRET' not in str(caught.value)

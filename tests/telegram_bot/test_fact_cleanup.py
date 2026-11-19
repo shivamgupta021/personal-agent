@@ -106,7 +106,7 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
                 if operation == 'slow_commit' and index == 1:
                     await delayed_commit(True)
                 conversation = ConversationService('targeted-owner', ResearchAgent(FunctionModel(model), Firecrawl(web)))
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     try:
                         await service.poll_once()
@@ -205,7 +205,7 @@ def test_targeted_forgetting_purges_compaction_and_recall_and_retries_trace_clea
         ):
             for _ in turns:
                 conversation = ConversationService('compacted-cleanup', ResearchAgent(FunctionModel(model), Firecrawl(web)), TraceCleanup(lf).run)
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
                 if turn == 5:
@@ -322,7 +322,7 @@ def test_targeted_forgetting_retains_unrelated_tool_evidence(tmp_path: Path) -> 
         ):
             for _ in turns:
                 conversation = ConversationService('tool-evidence-owner', ResearchAgent(FunctionModel(model), Firecrawl(web)))
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
     asyncio.run(run())

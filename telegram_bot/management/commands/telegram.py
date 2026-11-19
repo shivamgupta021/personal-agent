@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand, CommandError
 from core.commands import run_async
 from conversations.service import ConversationService
 from research.service import ResearchService
+from grievances.service import SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
 from telegram_bot.client import TelegramClient
 from telegram_bot.constants import HTTP_TIMEOUT_SECONDS
@@ -35,9 +36,12 @@ class Command(BaseCommand):
         # Separate cursor/lock per bot without putting its secret in a filename.
         identity = hashlib.sha256(token.split(':', 1)[0].encode()).hexdigest()[:16]
         state = PollingState(settings.TELEGRAM_STATE_DIR / identity)
-        research = ResearchService(SubscriptionService(settings.SUBSCRIPTION_STATE_DIR))
+        subscription = SubscriptionService(settings.SUBSCRIPTION_STATE_DIR)
+        research = ResearchService(subscription)
+        owner_identity = f'{identity}:{owner_id}'
+        application = SubscriptionApplicationService(subscription, ConversationService(owner_identity, research).run)
         async with httpx2.AsyncClient(
             base_url=f'https://api.telegram.org/bot{token}/', timeout=HTTP_TIMEOUT_SECONDS,
             follow_redirects=False,
         ) as client:
-            await TelegramService(TelegramClient(client), state, owner_id, ConversationService(f'{identity}:{owner_id}', research).run).run()
+            await TelegramService(TelegramClient(client), state, owner_id, turn_handler=application.run, identity=owner_identity).run()

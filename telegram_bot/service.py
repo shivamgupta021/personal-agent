@@ -5,6 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from core.errors import user_error_message
+from core.turns import OwnerTurn
 
 from telegram_bot.client import TelegramClient, TelegramError
 from telegram_bot.state import PollingState
@@ -14,11 +15,14 @@ logger = logging.getLogger(__name__)
 
 class TelegramService:
     def __init__(self, client: TelegramClient, state: PollingState, owner_id: int,
-                 research: Callable[[str], Awaitable[str]]) -> None:
+                 turn_handler: Callable[[OwnerTurn], Awaitable[str]], *, identity: str) -> None:
         self.client = client
         self.state = state
         self.owner_id = owner_id
-        self.research = research
+        self.turn_handler = turn_handler
+        self.identity = identity
+        if not identity:
+            raise ValueError('Normalized turns require the bot/owner identity')
 
     async def poll_once(self) -> None:
         offset = self.state.offset()
@@ -39,15 +43,16 @@ class TelegramService:
                 continue
             if question.startswith('/'):
                 await self.client.send(self.owner_id,
-                    'Send a public research question or follow-up. Completed conversation history survives restarts. '
-                    'If a request is interrupted or no reply arrives, send it again. '
-                    'You can ask to delete this entire conversation. Use public topics only; configured Langfuse tracing may capture content.')
+                    'Create a named grievance case, list or select a case, or send a public research question. '
+                    'Case facts and selection persist; conversation history survives restarts. Send a follow-up or explicitly return to general research to leave a case. '
+                    'If no reply arrives, send the request again. Cases stay private in traces; public research debugging may capture content.')
                 continue
-            logger.info('Research request accepted')
+            logger.info('Owner request accepted')
             try:
-                answer = await self.research(question)
+                answer = await self.turn_handler(OwnerTurn(self.identity, self.identity,
+                    f'telegram:{update_id}', question))
             except Exception as error:
-                logger.warning('Research failed; request will not be replayed')
+                logger.warning('Request failed; request will not be replayed')
                 answer = user_error_message(error) + ' Please send your question again.'
             await self.client.send(self.owner_id, answer)
             logger.info('Reply delivered')

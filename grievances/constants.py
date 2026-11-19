@@ -1,0 +1,9 @@
+MAX_INPUT_CHARS = 16000
+MAX_CONTEXT_CHARS = 32000
+MAX_FACT_CHARS = 2000
+MAX_MODEL_REQUESTS = 3
+MAX_OUTPUT_TOKENS = 3000
+RUN_TIMEOUT_SECONDS = 120
+MATERIAL_FIELDS = ('company', 'purchase_context', 'issue', 'requested_remedy', 'purchase_date', 'amount_paid')
+
+VALIDATION_RETRIES = 1

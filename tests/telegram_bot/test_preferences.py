@@ -81,7 +81,7 @@ def test_preference_lifecycle_through_telegram(tmp_path: Path, mode: str) -> Non
         async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http, httpx2.AsyncClient() as web:
             for request in turns:
                 conversation = ConversationService('preference-owner', ResearchAgent(FunctionModel(model), Firecrawl(web)))
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 try:
                     await service.poll_once()
                 except TelegramError:
@@ -144,7 +144,7 @@ def test_preferences_are_independent_idempotent_and_preserve_unrelated_content(t
         async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http, httpx2.AsyncClient() as web:
             for _ in turns:
                 service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
-                    ConversationService('independent-owner', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
+                    lambda turn: (ConversationService('independent-owner', ResearchAgent(FunctionModel(model), Firecrawl(web))).run) (turn.text), identity='test-bot:7')
                 await service.poll_once()
                 if turn == 2:
                     saved = [row async for row in SavedPreference.objects.all()]
