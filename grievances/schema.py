@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from grievances.constants import (MAX_FACT_CHARS, POLICY_MAX_FINDINGS, POLICY_MAX_QUOTE_CHARS,
+from grievances.constants import (MAX_FOLLOWUP_REPLIES, MAX_REPLY_CHARS, MAX_FACT_CHARS, POLICY_MAX_FINDINGS, POLICY_MAX_QUOTE_CHARS,
                                   POLICY_PUBLIC_FIELD_CHARS, POLICY_SITE_URL_CHARS)
 
 FactKey = Literal['company', 'purchase_context', 'issue', 'requested_remedy', 'purchase_date',
@@ -19,10 +19,13 @@ class SuppliedFact(BaseModel):
 
 
 class IntakeAction(BaseModel):
-    action: Literal['create', 'list', 'select', 'show', 'update', 'leave', 'public', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research']
+    action: Literal['create', 'list', 'select', 'show', 'update', 'leave', 'public', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
     case_id: str = ''
     public_brief: 'PublicResearchBrief | None' = None
     draft_version: int | None = Field(default=None, ge=1)
+    draft_follow_up: bool = False
+    reply_text: str = Field(default='', max_length=MAX_REPLY_CHARS)
+    sent_details: str = Field(default='', max_length=MAX_FACT_CHARS)
     label: str = Field(default='', max_length=120)
     intent_quote: str = Field(default='', max_length=500, description='Required for create/select/leave: exact current user words explicitly requesting this action.')
     correction_quote: str = Field(default='', max_length=500)
@@ -33,6 +36,12 @@ DraftFactKey = Literal['company', 'purchase_context', 'purchase_date', 'delivery
                        'order_reference', 'issue', 'amount_paid', 'refund_amount', 'currency', 'evidence']
 
 
+class ReplyExcerpt(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    reply_id: int = Field(ge=1)
+    quote: str = Field(min_length=1, max_length=MAX_REPLY_CHARS)
+
+
 class DraftPlan(BaseModel):
     """A writing plan has references and style choices, never invented factual prose."""
 
@@ -40,6 +49,8 @@ class DraftPlan(BaseModel):
     fact_order: list[DraftFactKey] = Field(default_factory=list, max_length=10)
     greeting: Literal['hello', 'dear_support'] = 'dear_support'
     needs_clarification: bool = False
+    reply_references: list[ReplyExcerpt] = Field(default_factory=list, max_length=MAX_FOLLOWUP_REPLIES)
+    sent_report_ids: list[int] = Field(default_factory=list, max_length=MAX_FOLLOWUP_REPLIES)
 
 
 class PublicResearchBrief(BaseModel):
