@@ -458,3 +458,34 @@ outages, injected instructions, actual outbound privacy and changes to reviewed 
 The optional scenario filter runs a focused subset on the same dataset. Compare prompt,
 fixture and evaluator hashes; manually read the quotations and final letter. Real Firecrawl
 connectivity/provenance is verified separately from these model-quality experiments.
+
+### Manual sending, replies and follow-ups
+
+The assistant prepares drafts; you send them yourself. Report the exact version so the record
+cannot silently attach to a different draft:
+
+```text
+I sent draft version 1 yesterday by email. Record that version as sent.
+Company reply: "We can offer a replacement, not a refund. Please send a photo."
+Please save this reply and draft a follow-up asking for my refund.
+```
+
+Saved replies retain the supplied text. Follow-up drafts reference their source replies and use
+current case facts. Earlier versions remain unchanged, including an outdated version you
+actually sent. Ambiguous send details stay unknown; a company request for evidence does not
+mean that evidence was attached or sent. If reply storage succeeds but generation fails, the
+reply remains saved and the response reports the incomplete phase.
+
+A company offer leaves the case open. Use an explicit outcome such as `I consider this case
+resolved` or `Close this case without resolution`. Neither action sends anything externally.
+
+Rerun the real-model examples through native Langfuse datasets/experiments:
+
+```sh
+uv run python manage.py evaluate_grievances --progress
+uv run python manage.py evaluate_grievances --progress --scenario replacement_followup
+```
+
+Review the saved letter and company attribution alongside the coarse state/version scores.
+Controlled database tests separately cover failed generation, duplicate delivery and stale
+results during corrections; a passing model example does not replace those checks.
