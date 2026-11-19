@@ -1,6 +1,6 @@
 # Personal Agent
 
-A local Django project with a real research agent using your ChatGPT subscription, Pydantic AI, and your existing Firecrawl service. Django supplies application startup, settings, logging, and management commands. Case persistence, HTTP endpoints, and Telegram remain later work.
+A local Django project with a real research agent using your ChatGPT subscription, Pydantic AI, and your existing Firecrawl service. Django supplies application startup, settings, logging, and management commands. Owner-only Telegram, persistent conversation memory, and grievance intake use the same application services. External sending is not available.
 
 ## Run locally
 
@@ -167,9 +167,9 @@ The existing research service returns its answer and source links as plain text.
 are split. Review the normal `research run` and its model/search/read spans in local Langfuse.
 `LANGFUSE_CAPTURE_CONTENT=true` includes the question and answer, just as in the terminal flow.
 
-Only the configured owner in their private chat is accepted. Each message is independent:
-there is no saved conversation or preference memory. Questions run serially, using the
-existing subscription lock. Keep one bot process running; Ctrl-C stops it.
+Only the configured owner in their private chat is accepted. Conversations and explicit
+preferences persist as described below. Questions run serially, using the existing
+subscription lock. Keep one bot process running; Ctrl-C stops it.
 
 A private cursor file under `.local/telegram/` is saved **before** work starts. Interrupted
 research or uncertain reply delivery is not retried automatically: resend the question.
@@ -364,3 +364,29 @@ uv run python manage.py evaluate_conversation --preferences
 
 Its scores check stored state and local redaction. Review the actual replies and
 clarification behavior in the linked Langfuse experiment as well.
+
+## Grievance intake
+
+Apply migrations and start the normal Telegram command. Use explicit case labels:
+
+- “Create a refund case called Kettle return. Company: Example Home. My kettle arrived broken. I want a refund.”
+- Supply the purchase date, amount paid, requested refund and evidence description when asked. Missing values stay unknown.
+- “List my cases”, “Select the Kettle return case”, and “Show the facts for my selected case” inspect saved state.
+- “Correction: the amount paid was INR 2,700. Update the amount paid only.” changes that fact while preserving earlier revisions. A conflicting amount without a correction prompts clarification.
+- “Return to general public research mode” leaves the selected case.
+
+Cases, messages, fact revisions and selection survive restart. Duplicate Telegram delivery
+IDs cannot repeat saved case actions. Reusing a case label does not silently create another
+case or overwrite its facts. This intake milestone does not send complaints or resolve cases.
+
+Private case agent spans omit content even when public research content capture is enabled.
+Use the native synthetic intake experiment to inspect extracted proposals and saved facts:
+
+```sh
+uv run python manage.py evaluate_grievances
+```
+
+It runs the real subscription model against fictional intake, missing-fact, correction,
+case-switching and ambiguity scenarios and publishes the `grievance-intake-v1` dataset
+experiment. Inspect outputs and individual checks, not only the aggregate score. Public
+research is a controlled boundary in this suite; live Firecrawl is tested separately.

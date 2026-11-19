@@ -69,7 +69,7 @@ def test_recalls_omitted_original_after_compaction_restart_and_deletion(tmp_path
         ):
             for _ in turns:
                 conversation = ConversationService('recall-owner', ResearchAgent(FunctionModel(model), Firecrawl(web)))
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
     asyncio.run(run())
@@ -152,7 +152,7 @@ def test_recall_evidence_is_ordered_bounded_and_scoped(tmp_path: Path, scenario:
             for index in range(len(turns)):
                 identity = 'different-owner' if scenario == 'owner' and index == len(turns) - 1 else 'original-owner'
                 conversation = ConversationService(identity, ResearchAgent(FunctionModel(model), Firecrawl(web)))
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
     asyncio.run(run())

@@ -4,6 +4,8 @@ import asyncio
 import logging
 
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.capabilities.instrumentation import Instrumentation
+from core.tracing import tracing
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.tools import RunContext
 from pydantic_ai_harness.compaction import SummarizingCompaction
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationCompaction(AbstractCapability[None]):
-    def __init__(self, context: ConversationContext) -> None:
+    def __init__(self, context: ConversationContext, *, private: bool = False) -> None:
         self.context = context
         self.attempts = 0
         self.summarizer: SummarizingCompaction[None] = SummarizingCompaction(
@@ -25,7 +27,7 @@ class ConversationCompaction(AbstractCapability[None]):
             tokenizer=self.byte_count, preserve_first_user_message=False,
             tool_return_max_chars=None, summary_prompt=SUMMARY_PROMPT,
             model_settings={'max_tokens': constants.SUMMARY_OUTPUT_TOKENS},
-            summarization_capabilities=[ConversationBudget()], retries=constants.SUMMARY_RETRIES,
+            summarization_capabilities=[ConversationBudget(), *([Instrumentation(settings=tracing.private_instrumentation())] if private else [])], retries=constants.SUMMARY_RETRIES,
         )
 
     @staticmethod

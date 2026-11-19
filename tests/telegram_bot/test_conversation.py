@@ -48,7 +48,7 @@ def test_follow_up_retains_context_after_restart(tmp_path: Path) -> None:
                 )]))
                 for _ in range(2):
                     conversation = ConversationService('test-owner', ResearchAgent(model, Firecrawl(web)))
-                    service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                    service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                     with service.state.locked():
                         await service.poll_once()
     asyncio.run(run())
@@ -84,7 +84,7 @@ def test_forgetting_stops_old_context_and_requests_trace_cleanup(tmp_path: Path)
             async with httpx2.AsyncClient(transport=httpx2.MockTransport(lambda r: httpx2.Response(500))) as web:
                 for _ in range(3):
                     conversation = ConversationService('test-forget', ResearchAgent(FunctionModel(respond), Firecrawl(web)))
-                    service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                    service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                     with service.state.locked():
                         await service.poll_once()
     asyncio.run(run())
@@ -116,7 +116,7 @@ def test_oversized_follow_up_keeps_previous_context(tmp_path: Path, monkeypatch:
                     'amber' if 'amber' in str(messages) else 'unknown',
                 )]))
                 conversation = ConversationService('test-budget', ResearchAgent(model, Firecrawl(web)))
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     for index in range(5):
                         # Prove deletion works even when the retained history itself cannot fit.
@@ -158,7 +158,7 @@ def test_failed_delivery_keeps_answer_but_interrupted_model_does_not(tmp_path: P
             async with httpx2.AsyncClient(transport=httpx2.MockTransport(lambda r: httpx2.Response(500))) as web:
                 for _ in range(2):
                     conversation = ConversationService('test-interruption', ResearchAgent(FunctionModel(model), Firecrawl(web)))
-                    service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                    service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                     with service.state.locked():
                         try:
                             await service.poll_once()
@@ -203,7 +203,7 @@ def test_trace_cleanup_failure_is_retryable_without_restoring_history(tmp_path: 
         ):
             for _ in range(4):
                 conversation = ConversationService('test-cleanup', ResearchAgent(FunctionModel(model), Firecrawl(web)), TraceCleanup(lf).run)
-                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, lambda turn: (conversation.run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
     try:
@@ -272,7 +272,7 @@ def test_compaction_preserves_early_fact_across_restart(tmp_path: Path) -> None:
         ):
             for _ in range(8):
                 service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
-                    ConversationService('compaction-test', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
+                    lambda turn: (ConversationService('compaction-test', ResearchAgent(FunctionModel(model), Firecrawl(web))).run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
                 await verify_persisted_state()
@@ -313,7 +313,7 @@ def test_summary_failure_keeps_saved_context_and_only_continues_within_budget(tm
         ):
             for _ in range(4):
                 service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
-                    ConversationService('failed-compaction', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
+                    lambda turn: (ConversationService('failed-compaction', ResearchAgent(FunctionModel(model), Firecrawl(web))).run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
     asyncio.run(run())
@@ -358,7 +358,7 @@ def test_large_tool_result_compacts_between_calls_without_orphaning_tools(tmp_pa
         ):
             for _ in range(2):
                 service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
-                    ConversationService('tool-compaction', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
+                    lambda turn: (ConversationService('tool-compaction', ResearchAgent(FunctionModel(model), Firecrawl(web))).run) (turn.text), identity='test-bot:7')
                 with service.state.locked():
                     await service.poll_once()
     asyncio.run(run())

@@ -5,6 +5,7 @@ import logging
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from opentelemetry.trace import NoOpTracerProvider, Span, StatusCode
@@ -18,6 +19,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.instrumented import InstrumentationSettings
 
 logger = logging.getLogger(__name__)
+_private_content: ContextVar[bool] = ContextVar('private_trace_content', default=False)
 
 
 class Tracing:
@@ -52,23 +54,31 @@ class Tracing:
         logger.info('Native Pydantic AI tracing enabled; content capture %s',
                     'enabled' if settings.LANGFUSE_CAPTURE_CONTENT else 'disabled')
 
+    def private_instrumentation(self) -> InstrumentationSettings:
+        """Per-agent privacy policy independent of public debugging configuration."""
+        return InstrumentationSettings(tracer_provider=self._provider or NoOpTracerProvider(),
+            include_content=False, include_binary_content=False, include_model_request_parameters=False)
+
     @contextmanager
-    def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever') -> Iterator[Span]:
+    def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever', private: bool = False) -> Iterator[Span]:
         provider = self._provider or NoOpTracerProvider()
         with provider.get_tracer('personal-agent.retrieval').start_as_current_span(
             name, record_exception=False, set_status_on_exception=False,
             attributes={'langfuse.observation.type': kind},
         ) as span:
-            if settings.LANGFUSE_CAPTURE_CONTENT:
+            token = _private_content.set(private or _private_content.get())
+            if settings.LANGFUSE_CAPTURE_CONTENT and not _private_content.get():
                 span.set_attribute('langfuse.observation.input', json.dumps(inputs))
             try:
                 yield span
             except BaseException:
                 span.set_status(StatusCode.ERROR)
                 raise
+            finally:
+                _private_content.reset(token)
 
     def record_output(self, span: Span, output: dict[str, Any]) -> None:
-        if settings.LANGFUSE_CAPTURE_CONTENT:
+        if settings.LANGFUSE_CAPTURE_CONTENT and not _private_content.get():
             span.set_attribute('langfuse.observation.output', json.dumps(output))
         if 'error' in output:
             span.set_status(StatusCode.ERROR)

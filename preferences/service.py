@@ -19,6 +19,7 @@ from preferences import constants
 from preferences.prompts import PREFERENCE_AUTHORIZATION, PREFERENCE_CONTEXT
 from preferences.store import Preference, PreferenceStore
 from research.constants import MAX_MODEL_REQUESTS
+from core.tracing import tracing
 
 
 class PreferenceIntent(BaseModel):
@@ -36,15 +37,17 @@ class PreferenceReply(Exception):
 
 
 class PreferenceService:
-    def __init__(self, model: Model, facts: FactCleanup) -> None:
+    def __init__(self, model: Model, facts: FactCleanup, *, private: bool = False) -> None:
         self.facts = facts
         self.store = PreferenceStore()
-        self.editor = FactEditor(model, facts)
+        self.editor = FactEditor(model, facts, private=private)
         self.current: list[Preference] = []
         options: ModelSettings = {'max_tokens': constants.AUTHORIZATION_OUTPUT_TOKENS}
         self.authorizer: Agent[None, PreferenceIntent] = Agent(model, output_type=PreferenceIntent,
             instructions=PREFERENCE_AUTHORIZATION, name='preference_authorization', retries=0,
             model_settings=options, capabilities=[ConversationBudget()])
+        if private:
+            self.authorizer.instrument = tracing.private_instrumentation()
 
     async def instructions(self) -> str:
         self.current = await self.store.list(self.facts.identity)

@@ -22,6 +22,7 @@ from conversations.context import ConversationContext
 from conversations.prompts import FACT_EDIT_AUTHORIZATION, FACT_EDIT_REDACTION, FACT_EDIT_VERIFICATION
 from conversations.store import ConversationStore
 from research.constants import MAX_MODEL_REQUESTS
+from core.tracing import tracing
 
 
 class EditIntent(BaseModel):
@@ -201,7 +202,7 @@ class FactCleanup:
 
 
 class FactEditor:
-    def __init__(self, model: Model, cleanup: FactCleanup) -> None:
+    def __init__(self, model: Model, cleanup: FactCleanup, *, private: bool = False) -> None:
         self.cleanup = cleanup
         options: ModelSettings = {'max_tokens': constants.FACT_EDIT_OUTPUT_TOKENS}
         self.authorizer: Agent[None, EditIntent] = Agent(model, output_type=EditIntent,
@@ -213,6 +214,10 @@ class FactEditor:
         self.verifier: Agent[None, EditVerification] = Agent(model, output_type=EditVerification,
             instructions=FACT_EDIT_VERIFICATION, name='fact_edit_verification', retries=0,
             model_settings=options, capabilities=[ConversationBudget()])
+        if private:
+            self.authorizer.instrument = tracing.private_instrumentation()
+            self.redactor.instrument = tracing.private_instrumentation()
+            self.verifier.instrument = tracing.private_instrumentation()
 
     async def edit_conversation_fact(self, ctx: RunContext[None], target: Annotated[str, Field(min_length=1, max_length=constants.FACT_EDIT_SCOPE_CHARS)]) -> EditResult:
         """Correct or forget a selected conversation fact only on an explicit current user request.

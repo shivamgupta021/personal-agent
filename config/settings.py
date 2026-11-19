@@ -17,6 +17,7 @@ INSTALLED_APPS = [
     'core.apps.CoreConfig',
     'conversations.apps.ConversationsConfig',
     'preferences.apps.PreferencesConfig',
+    'grievances.apps.GrievancesConfig',
     'subscriptions.apps.SubscriptionsConfig',
     'research.apps.ResearchConfig',
     'telegram_bot.apps.TelegramBotConfig',
