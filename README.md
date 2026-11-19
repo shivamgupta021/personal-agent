@@ -390,3 +390,29 @@ It runs the real subscription model against fictional intake, missing-fact, corr
 case-switching and ambiguity scenarios and publishes the `grievance-intake-v1` dataset
 experiment. Inspect outputs and individual checks, not only the aggregate score. Public
 research is a controlled boundary in this suite; live Firecrawl is tested separately.
+
+### Factual complaint drafts
+
+After selecting a case, ask “Draft a factual refund email.” The result is saved as an
+immutable version with its source fact revision. It is not sent. Missing required facts
+produce an explicitly incomplete draft with named gaps; the requested refund amount is
+never assumed to equal the amount paid.
+
+Use “List my saved draft versions”, “Read draft version 1”, or “Read my current draft”.
+After an explicit material correction, old versions remain readable but are marked
+outdated. Ask for a new draft to use the corrected facts. A result arriving after a fact
+or selection change is rejected rather than silently saved against newer state.
+
+The model selects a typed writing plan; application code renders the saved facts and
+requested remedy. It cannot add unsupported factual prose or policy rights. Evidence
+is quoted as your account, preserving uncertainty without claiming attachments. Semantic
+consistency checks still depend on the model and are evaluated with finite examples.
+
+```sh
+uv run python manage.py evaluate_grievances --drafts
+```
+
+This publishes a fresh `grievance-factual-drafts-v1` experiment. Inspect entire letters,
+version/current/outdated fields and individual checks. Scenarios cover corrections,
+incomplete facts, uncertain evidence, case isolation, requested deadlines/component
+charges and money-back wording. No web research or external sending is used.

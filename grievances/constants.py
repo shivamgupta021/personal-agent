@@ -7,3 +7,8 @@ RUN_TIMEOUT_SECONDS = 120
 MATERIAL_FIELDS = ('company', 'purchase_context', 'issue', 'requested_remedy', 'purchase_date', 'amount_paid')
 
 VALIDATION_RETRIES = 1
+
+DRAFT_REQUIRED_FIELDS = (*MATERIAL_FIELDS, 'refund_amount')
+DRAFT_FACT_FIELDS = ('company', 'purchase_context', 'purchase_date', 'delivery_date',
+                     'order_reference', 'issue', 'amount_paid', 'refund_amount', 'currency', 'evidence')
+DRAFT_MATERIAL_FIELDS = (*DRAFT_FACT_FIELDS, 'requested_remedy')

@@ -7,8 +7,8 @@ from asgiref.sync import sync_to_async
 from django.db import transaction
 
 from core.turns import OwnerTurn
-from grievances.constants import MATERIAL_FIELDS
-from grievances.models import CaseFactRevision, CaseMessage, CaseOperationReceipt, CaseSelection, GrievanceCase
+from grievances.constants import DRAFT_MATERIAL_FIELDS, MATERIAL_FIELDS
+from grievances.models import CaseFactRevision, CaseMessage, CaseOperationReceipt, CaseSelection, ComplaintDraft, GrievanceCase
 from grievances.schema import IntakeAction
 
 
@@ -33,6 +33,31 @@ class CaseView:
     facts: dict[str, str]
     history: list[dict[str, str]]
     messages: list[str]
+
+
+@dataclass(frozen=True)
+class DraftContent:
+    subject: str
+    body: str
+    missing_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DraftView:
+    id: str
+    version: int
+    fact_revision: int
+    subject: str
+    body: str
+    missing_fields: tuple[str, ...]
+    outdated: bool
+    current: bool
+
+    def describe(self) -> str:
+        state = 'outdated' if self.outdated else ('current usable draft' if self.current else 'saved version')
+        if self.missing_fields:
+            state += '; incomplete — please supply: ' + ', '.join(field.replace('_', ' ') for field in self.missing_fields)
+        return f'Draft version {self.version} ({state}; unsent).\nSubject: {self.subject}\n\n{self.body}'
 
 
 class CaseStore:
@@ -86,6 +111,10 @@ class CaseStore:
     def _receipt_text(self, receipt: CaseOperationReceipt) -> str:
         if receipt.case_id and not GrievanceCase.objects.filter(owner_id=receipt.owner_id, pk=receipt.case_id).exists():
             return 'This delivery was already processed. Its case is no longer available; nothing was recreated.'
+        if receipt.action == 'draft' and receipt.case_id:
+            draft = ComplaintDraft.objects.filter(operation=receipt).first()
+            if draft:
+                return f'This delivery was already processed. Draft version {draft.version} is saved; ask to read that version. No additional changes were made.'
         return 'This delivery was already processed. No additional changes were made. Ask to show or list your saved cases.'
 
     @sync_to_async
@@ -153,7 +182,7 @@ class CaseStore:
                     reply = ('Facts saved. ' if outcome == 'saved' else '') + self.describe(case)
             else:
                 case = None
-                reply = 'Please create or explicitly select a case, or clarify the case and requested action. Drafting, research and case outcomes are not available yet.'
+                reply = 'Please create or explicitly select a case, or clarify the case and requested action. Please specify whether to inspect facts or draft a refund email. Research and case outcomes are not available yet.'
             if case is not None and action.action in ('create', 'update', 'show') and outcome != 'existing':
                 CaseMessage.objects.create(case=case, role='user', text=turn.text)
                 CaseMessage.objects.create(case=case, role='assistant', text=reply)
@@ -176,3 +205,68 @@ class CaseStore:
         if missing:
             body += '\nPlease supply missing details when known: ' + ', '.join(missing) + '.'
         return body
+
+
+    def _draft_views(self, owner_id: str, case_id: str) -> list[DraftView]:
+        case = self._view(owner_id, case_id)
+        if case is None:
+            return []
+        rows = list(ComplaintDraft.objects.filter(case_id=case.id).order_by('version'))
+        outdated: dict[int, bool] = {}
+        for row in rows:
+            source = case.history[row.fact_revision - 1]
+            outdated[row.pk] = any(
+                any(later.get(key) != source.get(key) for key in DRAFT_MATERIAL_FIELDS)
+                for later in case.history[row.fact_revision:])
+        usable = [row.version for row in rows if not outdated[row.pk] and not row.missing_fields]
+        current_version = max(usable, default=0)
+        return [DraftView(str(row.pk), row.version, row.fact_revision, row.subject, row.body,
+                          tuple(row.missing_fields), outdated[row.pk], row.version == current_version) for row in rows]
+
+    @sync_to_async
+    def list_drafts(self, owner_id: str, case_id: str) -> list[DraftView]:
+        return self._draft_views(owner_id, case_id)
+
+    @sync_to_async
+    def get_draft(self, owner_id: str, case_id: str, version: int | None = None) -> DraftView | None:
+        return next((draft for draft in self._draft_views(owner_id, case_id)
+                     if (draft.version == version if version is not None else draft.current)), None)
+
+    @sync_to_async
+    def read_drafts(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, version: int | None, *, listing: bool) -> str:
+        with transaction.atomic():
+            selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
+            case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=current.id).first()
+            if (selected.revision != selection.revision or str(selected.case_id) != current.id
+                    or case is None or case.revision != current.revision):
+                return 'Case state changed while this request was running. Please request the drafts again.'
+            drafts = self._draft_views(turn.owner_id, current.id)
+            if listing:
+                if not drafts:
+                    return 'No saved drafts for this case.'
+                return '\n'.join(f'Version {draft.version}: ' +
+                    ('outdated' if draft.outdated else ('current usable draft' if draft.current else 'saved version')) +
+                    ('; incomplete' if draft.missing_fields else '') + '; unsent' for draft in drafts)
+            draft = next((item for item in drafts if (item.version == version if version is not None else item.current)), None)
+            return draft.describe() if draft else 'No current usable draft or requested version is available. List drafts to inspect incomplete or outdated versions.'
+
+    @sync_to_async
+    def save_draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, content: DraftContent) -> str:
+        with transaction.atomic():
+            selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
+            receipt = CaseOperationReceipt.objects.filter(owner_id=turn.owner_id, conversation_id=turn.conversation_id, delivery_id=turn.delivery_id).first()
+            if receipt:
+                return self._receipt_text(receipt)
+            case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=current.id).first()
+            if selected.revision != selection.revision or str(selected.case_id) != current.id:
+                return 'Case selection changed while drafting. No draft was saved; please request it again.'
+            if case is None or case.revision != current.revision:
+                return 'Case facts changed or the case was deleted while drafting. No draft was saved; please request it again.'
+            latest = ComplaintDraft.objects.filter(case=case).order_by('-version').first()
+            version = latest.version + 1 if latest else 1
+            receipt = CaseOperationReceipt.objects.create(owner_id=turn.owner_id, conversation_id=turn.conversation_id,
+                delivery_id=turn.delivery_id, action='draft', case_id=case.pk, revision=current.revision, outcome='saved')
+            row = ComplaintDraft.objects.create(case=case, version=version, fact_revision=current.revision, operation=receipt,
+                subject=content.subject, body=content.body, missing_fields=list(content.missing_fields))
+            return DraftView(str(row.pk), version, current.revision, content.subject, content.body, content.missing_fields,
+                             False, not content.missing_fields).describe()
