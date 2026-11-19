@@ -2,6 +2,10 @@
 
 from pydantic_ai.exceptions import RunCancelled, UsageLimitExceeded
 
+class ReplySavedDraftFailed(Exception):
+    """The correspondence commit succeeded but its requested generation did not."""
+
+
 SAFE_CONFIGURATION_ERRORS = {
     'Run the login command first.',
     'Another command is using this subscription session.',
@@ -11,6 +15,8 @@ SAFE_CONFIGURATION_ERRORS = {
 
 
 def user_error_message(error: Exception) -> str:
+    if isinstance(error, ReplySavedDraftFailed):
+        return 'Company reply saved; the follow-up draft could not finish. Request a follow-up again. No message was sent to the company.'
     if type(error) is RuntimeError and str(error) in SAFE_CONFIGURATION_ERRORS:
         return str(error)
     if isinstance(error, TimeoutError):

@@ -15,6 +15,7 @@ class GrievanceCase(models.Model):
     label_key: models.CharField[str, str] = models.CharField(max_length=120)
     status: models.CharField[str, str] = models.CharField(max_length=32, default='open')
     revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    progress_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
     created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -75,6 +76,10 @@ class ComplaintDraft(models.Model):
     subject: models.TextField[str, str] = models.TextField()
     body: models.TextField[str, str] = models.TextField()
     missing_fields = models.JSONField(default=list)
+    kind: models.CharField[str, str] = models.CharField(max_length=16, default='initial')
+    progress_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    reply_ids = models.JSONField(default=list)
+    sent_report_ids = models.JSONField(default=list)
     created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -107,3 +112,26 @@ class CaseResearch(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['case', 'revision'], name='unique_case_research_revision')]
+
+
+class SentReport(models.Model):
+    case: models.ForeignKey[GrievanceCase, GrievanceCase] = models.ForeignKey(GrievanceCase, on_delete=models.CASCADE)
+    draft: models.ForeignKey[ComplaintDraft, ComplaintDraft] = models.ForeignKey(ComplaintDraft, on_delete=models.CASCADE)
+    operation: models.OneToOneField[CaseOperationReceipt, CaseOperationReceipt] = models.OneToOneField(CaseOperationReceipt, on_delete=models.CASCADE)
+    details: models.TextField[str, str] = models.TextField(default='')
+    recorded_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+
+class CompanyReply(models.Model):
+    case: models.ForeignKey[GrievanceCase, GrievanceCase] = models.ForeignKey(GrievanceCase, on_delete=models.CASCADE)
+    operation: models.OneToOneField[CaseOperationReceipt, CaseOperationReceipt] = models.OneToOneField(CaseOperationReceipt, on_delete=models.CASCADE)
+    text: models.TextField[str, str] = models.TextField()
+    recorded_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+
+class CaseOutcome(models.Model):
+    case: models.ForeignKey[GrievanceCase, GrievanceCase] = models.ForeignKey(GrievanceCase, on_delete=models.CASCADE)
+    operation: models.OneToOneField[CaseOperationReceipt, CaseOperationReceipt] = models.OneToOneField(CaseOperationReceipt, on_delete=models.CASCADE)
+    outcome: models.CharField[str, str] = models.CharField(max_length=32)
+    owner_quote: models.TextField[str, str] = models.TextField()
+    recorded_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)

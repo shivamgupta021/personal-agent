@@ -7,16 +7,20 @@ import json
 import re
 
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, UsageLimitExceeded, RunCancelled
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
+from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn
 from core.tracing import tracing
 from grievances import constants
+from grievances.correspondence import CompanyReplyParser
 from grievances.drafts import DraftService
 from grievances.policy import PolicyResearchService, PublicResearchBoundary
 from grievances.policy_store import PolicyStateChanged, PolicyStore
 from research.tools.firecrawl import Firecrawl
+from grievances.progress_store import ProgressChanged, ProgressStore
 from grievances.prompts import INTAKE_INSTRUCTIONS, SELECTED_INTAKE_INSTRUCTIONS
 from grievances.schema import IntakeAction
 from grievances.store import CaseStore
@@ -39,8 +43,13 @@ class ApplicationService:
         self.agent.instrument = tracing.private_instrumentation()
 
     async def run(self, turn: OwnerTurn) -> str:
-        async with asyncio.timeout(constants.RUN_TIMEOUT_SECONDS):
-            return await self._run(turn)
+        try:
+            async with asyncio.timeout(constants.RUN_TIMEOUT_SECONDS):
+                return await self._run(turn)
+        except (ModelAPIError, UnexpectedModelBehavior, UsageLimitExceeded, RunCancelled, TimeoutError):
+            if await ProgressStore().reply_saved(turn):
+                raise ReplySavedDraftFailed from None
+            raise
 
     async def _run(self, turn: OwnerTurn) -> str:
         if self.is_memory_control(turn.text):
@@ -50,15 +59,18 @@ class ApplicationService:
             return replay
         if len(turn.text) > constants.MAX_INPUT_CHARS:
             return 'Please send a shorter case message. Nothing changed.'
+        company_reply = CompanyReplyParser().parse(turn.text)
         selection = await self.store.selection(turn.owner_id, turn.conversation_id)
         current = await self.store.get_case(turn.owner_id, selection.case_id) if selection.case_id else None
         brief = await PolicyStore().latest_brief(turn.owner_id, current.id) if current else None
         research_status = {'reviewed': brief is not None, 'confirmed': bool(brief and brief.confirmed),
                            'revision': brief.revision if brief else None,
                            'matches_current_facts': bool(brief and current and brief.fact_revision == current.revision)}
+        progress = await ProgressStore().snapshot(turn.owner_id, current.id) if current else None
+        draft_versions = [draft.version for draft in await self.store.list_drafts(turn.owner_id, current.id)] if current else []
         cases = await self.store.list_cases(turn.owner_id)
         preferences = await PreferenceStore().list(turn.owner_id)
-        payload = {'current_request': turn.text, 'research_status': research_status,
+        payload = {'current_request': turn.text, 'research_status': research_status, 'draft_versions': draft_versions,
                    'selected_case': {'id': current.id} if current else None,
                    'case_labels': [asdict(case) for case in cases],
                    'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences]}
@@ -70,7 +82,7 @@ class ApplicationService:
             result = await self.agent.run(encoded, usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                                           timeout=constants.RUN_TIMEOUT_SECONDS)
         action = result.output
-        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research') and current:
+        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up') and current:
             messages: list[str] = []
             size = len(json.dumps(current.facts)) + len(turn.text)
             for message in reversed(current.messages):
@@ -79,6 +91,7 @@ class ApplicationService:
                 messages.insert(0, message)
                 size += len(message)
             selected_payload = json.dumps({'current_request': turn.text, 'research_status': research_status,
+                'draft_versions': draft_versions, 'progress': asdict(progress) if progress else None,
                 'selected_case': {'id': current.id, 'facts': current.facts, 'messages': messages},
                 'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences]})
             if len(selected_payload) > constants.MAX_CONTEXT_CHARS:
@@ -87,8 +100,10 @@ class ApplicationService:
                 action = (await self.agent.run(selected_payload, instructions=SELECTED_INTAKE_INSTRUCTIONS, usage=usage,
                     usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                     timeout=constants.RUN_TIMEOUT_SECONDS)).output
-            if action.action not in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'clarify'):
+            if action.action not in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up', 'clarify'):
                 return 'Please clarify the intended case action. Nothing changed.'
+        if company_reply is not None and action.action not in ('record_reply', 'clarify'):
+            return 'Company correspondence cannot authorize case changes or sending. Please save the quoted reply first; nothing was changed.'
         if any(f.quote not in turn.text or f.value not in f.quote for f in action.facts):
             return 'I could not verify the supplied facts. Nothing changed; please state them explicitly.'
         if action.action in ('create', 'select', 'leave') and (not action.intent_quote or action.intent_quote not in turn.text):
@@ -99,8 +114,39 @@ class ApplicationService:
         if action.correction_quote and (action.correction_quote not in turn.text or not re.search(
                 r'\b(correct(?:ion)?|replace|change|update|amend)\b', action.correction_quote, re.IGNORECASE)):
             return 'Please explicitly state the correction. Nothing changed.'
-        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research') and action.case_id and action.case_id != selection.case_id:
+        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up') and action.case_id and action.case_id != selection.case_id:
             return 'Please explicitly select the intended case first. Nothing changed.'
+        if action.action in ('record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up'):
+            if current is None:
+                return 'Please select the intended case before reporting progress.'
+            if action.facts or action.correction_quote:
+                return 'Please save fact corrections separately before reporting sending.'
+            try:
+                if action.action == 'follow_up':
+                    return await DraftService(self.model, self.store).run(turn, selection, current, usage, follow_up=True)
+                if action.action == 'record_reply':
+                    saved = await ProgressStore().record_reply(turn, selection, current, action.reply_text, company_reply)
+                    if not saved.saved or not action.draft_follow_up:
+                        return saved.message
+                    if company_reply is None or not company_reply.requests_followup():
+                        return saved.message + ' Request a follow-up separately in your own words if needed.'
+                    refreshed = await self.store.get_case(turn.owner_id, current.id)
+                    if refreshed is None:
+                        return 'Company reply was saved, but the case is no longer available. No follow-up was saved.'
+                    draft_reply = await DraftService(self.model, self.store).run(turn.followup(), selection, refreshed, usage, follow_up=True)
+                    return saved.message + '\n' + draft_reply
+                if action.action in ('resolve', 'close_without_resolution'):
+                    outcome = 'resolved' if action.action == 'resolve' else 'closed_without_resolution'
+                    return await ProgressStore().record_outcome(turn, selection, current, outcome, action.intent_quote)
+                sent = await ProgressStore().record_sent(turn, selection, current, action.draft_version,
+                                                         action.intent_quote, action.sent_details)
+                if sent.saved and sent.version is not None:
+                    draft = await self.store.get_draft(turn.owner_id, current.id, sent.version)
+                    if draft and draft.outdated:
+                        return sent.message + ' That recorded version is outdated; its original text is preserved.'
+                return sent.message
+            except ProgressChanged:
+                return 'Case state changed while recording progress. Nothing was saved; please try again.'
         if action.action in ('review_research', 'confirm_research', 'research'):
             if current is None:
                 return 'Please select the intended case before policy research.'
