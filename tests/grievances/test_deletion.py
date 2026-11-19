@@ -338,3 +338,42 @@ def test_independent_general_memory_contains_no_case_context_during_concurrent_d
         assert 'I prefer short answers' in str(context.messages)
         assert 'ORDER-ALPHA' not in str(context.messages) and 'Lumen kettle' not in str(context.messages)
     asyncio.run(run())
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('setup', ['deleted', 'fresh', 'selected_other'])
+def test_deleted_details_question_is_answered_without_retrieval_or_mutation(setup: str) -> None:
+    async def run() -> None:
+        chat = ProgressConversation()
+        if setup != 'fresh':
+            alpha = await chat.setup()
+            await chat.service.delete_case(OwnerTurn('alpha', 'alpha', 'delete-alpha', 'Delete this case'), alpha)
+        if setup == 'selected_other':
+            await chat.turn('Create a case called Cobalt headphones. Company Cobalt Audio. Order ORDER-BETA-R9. Refund requested.',
+                'create', label='Cobalt headphones', intent_quote='Create a case', facts=[
+                    {'key': 'company', 'value': 'Cobalt Audio', 'quote': 'Cobalt Audio'},
+                    {'key': 'order_reference', 'value': 'ORDER-BETA-R9', 'quote': 'ORDER-BETA-R9'}])
+        cases = await chat.service.store.list_cases('alpha')
+        before = [await chat.service.store.get_case('alpha', case.id) for case in cases]
+        selection = await chat.service.store.selection('alpha', 'alpha')
+        preferences = await PreferenceStore().list('alpha')
+        public_calls: list[str] = []
+        async def public(message: str) -> str:
+            public_calls.append(message)
+            return 'Unexpected public request'
+        def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                {'action': 'clarify', 'clarification_reason': 'deleted_details'})])
+        app = ApplicationService(FunctionModel(respond), public)
+        answer = await app.run(OwnerTurn('alpha', 'alpha', 'deleted-question', 'Do you still have deleted case details?'))
+        assert "can't retrieve deleted case details" in answer.lower()
+        assert 'your case was deleted' not in answer.lower()
+        assert 'ORDER-ALPHA' not in answer and 'ORDER-BETA' not in answer
+        assert 'Lumen' not in answer and 'Cobalt' not in answer
+        assert 'official research' not in answer.lower()
+        assert public_calls == []
+        assert await app.store.list_cases('alpha') == cases
+        assert [await app.store.get_case('alpha', case.id) for case in cases] == before
+        assert await app.store.selection('alpha', 'alpha') == selection
+        assert await PreferenceStore().list('alpha') == preferences
+    asyncio.run(run())

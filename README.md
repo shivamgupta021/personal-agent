@@ -1,6 +1,6 @@
 # Personal Agent
 
-A local Django project with a real research agent using your ChatGPT subscription, Pydantic AI, and your existing Firecrawl service. Django supplies application startup, settings, logging, and management commands. Owner-only Telegram, persistent conversation memory, and grievance intake use the same application services. External sending is not available.
+A local Django project with a real research agent using your ChatGPT subscription, Pydantic AI, and your existing Firecrawl service. Django supplies application startup, settings, logging, and management commands. Owner-only Telegram, persistent conversation memory, preferences, and the refund-first grievance workflow use the same application services. External sending is not available.
 
 ## Run locally
 
@@ -21,6 +21,10 @@ Each research command starts fresh conversation history and consumes subscriptio
 manage.py
 config/            Django settings, logging, URL and server entry points
 core/              App startup, native tracing, safe command error boundary
+telegram_bot/      Owner-only polling, durable cursor and guarded reply delivery
+conversations/     Persisted turns, automatic compaction, archive recall and forgetting
+preferences/       Explicit saved preferences and their provenance
+grievances/        Case intake, factual drafts, official sources, progress and deletion
 research/          Agent, prompts, limits, service.py, Firecrawl tools
   management/commands/research.py
 subscriptions/     Authentication, credentials, service.py, model construction
@@ -39,7 +43,7 @@ The research agent uses Pydantic AI's high-level `run()`. The model plans one to
 
 Runtime addresses and credentials live in `config/settings.py`. Policy limits live in the relevant app's `constants.py`: eight model requests, ten tool calls, a 180-second run deadline, 45-second HTTP timeouts, and one validation retry. Each search batch contains at most three queries with five results each. Page reads return at most 16,000 characters and expose `next_offset`; downloads are bounded to 2 MB.
 
-Django configures progress logs on stderr. Answers and model listings go to stdout. Logs omit raw queries, URLs, page contents, and provider exception messages. Use public topics: model instructions exclude personal details from searches, but enforced private-case redaction is not implemented. URL checks reject obvious private targets; DNS and redirect protection remain Firecrawl's responsibility. Citations and prompt-injection resistance still need human assessment.
+Django configures progress logs on stderr. Answers and model listings go to stdout. Logs omit raw queries, URLs, page contents, and provider exception messages. The standalone `research` command is for public topics. The grievance workflow uses a separate reviewed public brief and never forwards the full private case to search. URL checks reject obvious private targets; DNS and redirect protection remain Firecrawl's responsibility. Citations and prompt-injection resistance still need human assessment.
 
 ## Langfuse
 
@@ -209,12 +213,12 @@ The bot still processes one owner message at a time; interruption requires manua
 resend. A completed answer is saved before delivery, so a failed Telegram send does
 not erase it. Interrupted model runs are not appended as completed turns.
 
-This milestone has no compaction or archival retrieval yet. A conservative 48,000-byte
+The original #23 slice introduced persistence; #24 and #25 below add automatic compaction and archival recall. A conservative 48,000-byte
 serialized request budget includes message history, tool definitions, instructions,
 and 8,000 units of framing/output headroom; output is capped at 4,000 tokens. Bytes
 are a pessimistic proxy rather than an exact provider tokenizer. The guard runs before
 every model call, including after tool results. When exceeded, it reports the limit
-and leaves saved history intact. Automatic compaction follows in #24.
+and leaves saved history intact when compaction cannot safely fit the request.
 
 Ask **“Delete this entire conversation.”** to remove local conversation history.
 This is a deletion control, not the normal mechanism for managing context length.
@@ -223,7 +227,7 @@ export has been flushed. The reply distinguishes local removal from remote clean
 Say **“retry trace cleanup”** to retry without invoking the model or re-exporting old
 content. Content-free trace IDs remain available for repeated cleanup because a 404
 before delayed ingestion is not proof of final deletion. This does not erase Telegram,
-provider, or independently made backup copies. Targeted forgetting arrives in #26.
+provider, or independently made backup copies. Targeted forgetting is implemented in #26 below.
 
 Run repeatable real-model conversation experiments after prompt/model changes:
 
@@ -271,8 +275,7 @@ is superseded by this milestone.
 Original messages remain in the local archive. Active context, originals, and summary
 source references commit together only after a successful turn. A failed summary keeps
 the previous context; the request continues only if that context fits the hard limit.
-Whole-conversation deletion includes summaries. Retrieval from the archive is not yet
-available in replies.
+Whole-conversation deletion includes summaries. Bounded archival recall is implemented in #25 below.
 
 Inspect `compact_messages` → `summarizing_compaction run` → model generation in
 Langfuse. The generation contains the summary prompt/output and usage; the surrounding
@@ -521,3 +524,74 @@ uv run python manage.py evaluate_grievances --deletion --scenario complete_graph
 These experiments use fictional data and fixed HTTP sources, verify every case-owned content
 table is empty after removal, and check that the other case and saved preference remain.
 Race, transport and cleanup-failure tests run separately from real-model examples.
+
+### Full MVP acceptance and prompt changes
+
+The integrated suite uses twenty versioned Langfuse dataset items. Most run the real
+subscription model against fictional case facts and fixed company pages; race and delivery
+items import separately executed PostgreSQL/Telegram regression evidence. These are SDK
+evaluators, so results appear in **Experiments** and **Scores**, not as scheduled dashboard
+evaluator rules. Changing a prompt requires a new experiment; opening an old score does not
+rerun the application.
+
+```sh
+uv run python manage.py evaluate_grievances --record-deterministic /tmp/grievance-integrity.json
+uv run python manage.py evaluate_grievances --acceptance \
+  --deterministic-evidence /tmp/grievance-integrity.json --output /tmp/grievance-run.json
+```
+
+Open the printed experiment URL. Review each item's actual answers, saved drafts, case
+state and source quotations against its expected fixture. State/privacy/source checks are
+coarse code checks. The experiment-time `semantic_review=pending` score records the initial review requirement.
+Later `review_*` scores and the finalized artifact record the independent decision; the initial
+marker is not a live approval status. An independent reviewer must
+assess usefulness, fidelity, uncertainty, clarification, disclosure and fabrication from
+the actual output. This prevents a successful test harness from masquerading as model quality.
+Real-model calls consume subscription capacity, and the complete suite takes several minutes.
+
+The final gate consumes the saved run, output-hash-bound review records, deterministic
+JUnit evidence, and live official-source/Telegram/telemetry/deletion artifacts. It does not
+rerun the model. Missing, stale, changed, skipped or failing evidence blocks acceptance.
+
+```sh
+uv run python manage.py evaluate_grievances --finalize /tmp/grievance-run.json \
+  --reviews /tmp/grievance-reviews.json \
+  --deterministic-evidence /tmp/grievance-integrity.json \
+  --live-evidence /tmp/grievance-live.json --output /tmp/grievance-final.json
+```
+
+The artifact contracts live in `grievances/acceptance.py` and
+`grievances/acceptance_evidence.py`. Do not fabricate review records to make a gate pass.
+Keep synthetic run artifacts locally; do not import real case content into evaluation datasets.
+
+Acceptance checkpoint, 20 November 2026: 199 deterministic tests passed, strict typechecking
+passed, and the complete twenty-item experiment passed its observable checks and independent
+assistant review. Seventeen items exercise the real subscription model; three import controlled
+race/replay/delivery evidence. The final gate also verified live Telegram/restart behavior,
+official-source research, private telemetry exclusion and actual synthetic trace absence.
+
+[Open the accepted local Langfuse experiment](http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/experiments/results?baseline=45557691d686b549).
+Its `review_*` scores contain reviewer names, excerpts and reasons. The local evidence bundle
+is `.local/acceptance/grievance-mvp/`, with `final.json`, `reviews.json`, `deterministic.json`
+and `live-evidence.json`. Earlier failed runs remain in `attempt1/`: a generic answer after
+case deletion failed usefulness/clarification review and was corrected before this full rerun.
+These finite synthetic results do not guarantee correctness on every real grievance.
+Eleven supplementary regressions also passed observable checks and independent assistant
+review: [open that experiment](http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/experiments/results?baseline=5bcea6ff22a517f2).
+Its local record is `supplementary-final.json` in the same evidence bundle.
+
+### Operating limits
+
+- Start only one personal-agent Telegram poller. After interruption, send a new message;
+  inspect saved state before repeating a mutation. Completed changes survive failed delivery.
+- Sent-report controls deliberately accept explicit wording beginning with `I sent` or
+  `I have sent`, including the draft version. Prefacing the sentence can cause a conservative
+  refusal. Resolution similarly uses the explicit forms documented above.
+- Company-source quotations are evidence for review, not a guarantee of refund eligibility.
+  Missing purchase-time terms and conflicting policies remain uncertain. Some low-value
+  site navigation/status text can still appear in research notes.
+- Private case traces retain timing, usage, message structure and tool schemas, but omit raw
+  case text even when public-research content capture is enabled. Empty private previews
+  therefore do not mean the case tools returned empty results.
+- This assistant prepares drafts and records your reports. It does not send complaints,
+  contact a company, attach documents, book anything or make payments.

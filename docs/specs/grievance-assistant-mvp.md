@@ -1,6 +1,6 @@
 # Personal grievance assistant MVP
 
-Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary and later approved milestone 2 as a real terminal research agent using Pydantic AI and local Firecrawl, with metadata-only tracing. Published as GitHub issue #1 in shivamgupta021/personal-agent; it is the umbrella spec, not a single implementation ticket. This spec does not authorize skipping the agreed learning checkpoints.
+Status: synthesized from the agreed design interview on 17 November 2026. The user confirmed the public-loop testing boundary and later approved milestone 2 as a real terminal research agent using Pydantic AI and local Firecrawl, with metadata-only tracing. Published as GitHub issue #1 in shivamgupta021/personal-agent; it is the umbrella spec, not a single implementation ticket. The owner subsequently authorized autonomous completion of the remaining tickets with independent reviews and acceptance gates (see the dated amendment below).
 
 ## Problem Statement
 
@@ -112,11 +112,11 @@ Build this in small learning milestones: inspect a minimal model/tool loop first
 
 The root project glossary supplies the domain vocabulary. The design interview is the source of agreed scope and supersedes earlier research recommendations, notably the earlier API-credit-first suggestion and the initial supplied-facts-only research boundary.
 
-Project-specific ChatGPT subscription access and local Firecrawl integration have been exercised successfully. Reuse them. Langfuse is running locally, but live project ingestion remains unverified until project keys are configured.
+Project-specific ChatGPT subscription access, local Firecrawl, and local Langfuse ingestion have been exercised successfully. Reuse them. Native experiments and trace read-back are part of the current acceptance process.
 
-This spec describes the full product, not a claim that every feature is implemented. The handwritten learning loop was completed and subsequently removed; only the real research loop remains in application code. The user brought local Firecrawl forward into milestone 2 to build a real terminal research agent rather than another synthetic example. Producing a complete spec does not remove the requirement to review milestones together.
+This spec describes the full product, not a claim that every feature is implemented. The handwritten learning loop was completed and subsequently removed; only the real research loop remains in application code. The user brought local Firecrawl forward into milestone 2 to build a real terminal research agent rather than another synthetic example. The later autonomous-run amendment replaces per-milestone human pauses with independent review and recorded acceptance evidence.
 
-The private GitHub repository shivamgupta021/personal-agent is the configured issue tracker. This spec is published as issue #1; milestone 2 is tracked in issue #2. Tracker and triage conventions live in docs/agents/. Milestone 1 is implemented; subsequent milestones remain subject to the learning checkpoints.
+The private GitHub repository shivamgupta021/personal-agent is the configured issue tracker. This spec is published as issue #1; milestone 2 is tracked in issue #2. Tracker and triage conventions live in docs/agents/. The original milestone-one note is historical; current delivery status is recorded in GitHub Issues and the dated amendments below.
 
 ## Milestone 2 scope update — 18 November 2026
 
@@ -125,7 +125,7 @@ The user approved public-web terminal research as the next usable vertical slice
 During manual review, the user requested Django app organization and native Pydantic AI–Langfuse instrumentation. Django now owns settings, logging, startup, and management commands; persistent case models and web endpoints remain out of scope. Global instrumentation replaces the manual trace exporter, with content capture disabled and serialized-payload privacy tests.
 
 
-## Provisional delivery breakdown — 18 November 2026
+## Historical provisional delivery breakdown — 18 November 2026
 
 - Milestone 1: completed as a learning exercise before GitHub tickets existed; synthetic application code was removed in `2363cc0`.
 - [#2](https://github.com/shivamgupta021/personal-agent/issues/2): completed real terminal research, subsequently simplified into root-level Django apps with shared native tracing. Current code checkpoint: `5d2e0cb`.
@@ -175,3 +175,29 @@ questions in #13–#15 remain for subsequent milestones.
 For this implementation run, the owner explicitly requested completion of all remaining tickets without waiting for per-milestone human review. Preserve the existing feature scopes, public test boundaries and acceptance gates. Each milestone still starts from merged main, receives independent standards/spec review, records deterministic and live evidence, and merges before its dependants begin. The owner receives a consolidated walkthrough afterward.
 
 The reconciled route is #25 → #26 → #27 → #5 → #6 → #7 → #8 → #9 → #10. Decision issues #13–15 and map #11 record ownership, recovery and acceptance semantics. No external sending, bookings, legal-rights research, hosting, paid fallback, or general multi-agent product architecture is added.
+
+## MVP acceptance checkpoint — 20 November 2026
+
+All approved memory and grievance implementation slices are complete. The final #10
+acceptance run passed all twenty dataset items, with independent assistant review of
+all seventeen real-model outputs and separately executed evidence for three controlled
+race/replay/delivery items. The full deterministic suite passed 199 tests; strict
+typechecking, Django checks and migration-drift checks passed. Eleven supplementary
+regressions also passed observable checks and independent output review.
+
+The live synthetic Telegram workflow was verified through creation, factual drafting,
+process restart, owner-reported sending, company reply, follow-up, explicit resolution
+and deletion. A separate live official-source run verified grounded quotations and
+uncertainty; native observation read-back verified private telemetry exclusion and
+actual absence of a previously observed synthetic trace after deletion.
+
+Main experiment: `45557691d686b549`; supplementary experiment: `5bcea6ff22a517f2`.
+Local evidence lives under `.local/acceptance/grievance-mvp/`. The earlier failed
+usefulness/clarification result after deletion remains preserved; a fixed unavailable
+response and public regression tests preceded the successful complete rerun.
+
+This finite acceptance does not establish universal correctness. External sending,
+bookings, payments, legal determinations and hosting remain out of scope. Private case
+previews intentionally omit raw content. Review researched policy applicability and
+drafts before manually sending correspondence. README contains the operational and
+rerun instructions; the final code walkthrough is delivered in chat.

@@ -231,6 +231,10 @@ class CaseStore:
                         self._revise(case, facts, action, 'correction' if conflicts else 'intake')
                         outcome = 'saved'
                     reply = ('Facts saved. ' if outcome == 'saved' else '') + self.describe(case)
+            elif action.action == 'clarify' and action.clarification_reason == 'deleted_details':
+                case = None
+                reply = ("I can't retrieve deleted case details. You can select a remaining saved case "
+                         'or start a new case using details you provide.')
             else:
                 case = None
                 reply = 'Please create or explicitly select a case, or clarify the case and requested action. Please specify whether to inspect facts or draft a refund email. For official research, review and confirm the public fields and official site first. You can report a sent version, save a company reply, request a follow-up or explicitly record an outcome. External sending is not available.'
