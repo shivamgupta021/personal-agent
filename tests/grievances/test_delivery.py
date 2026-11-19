@@ -136,3 +136,43 @@ def test_production_public_handoff_releases_real_subscription_lock(tmp_path: Pat
         assert answer == 'Public answer from subscription'
         assert requests == 2
     asyncio.run(run())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_failed_delivery_preserves_draft_and_replay_does_not_regenerate(tmp_path: Path) -> None:
+    drafting = False
+    generations = 0
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal generations
+        if 'fact_order' in info.output_tools[0].parameters_json_schema.get('properties', {}):
+            generations += 1
+            result: dict[str, object] = {'fact_order': ['issue']}
+        elif drafting:
+            result = {'action': 'draft'}
+        else:
+            result = {'action': 'create', 'label': 'Kettle', 'intent_quote': 'Create a case',
+                      'facts': [{'key': 'issue', 'value': 'broken', 'quote': 'broken'}]}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, result)])
+    def telegram(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith('getUpdates'):
+            return httpx2.Response(200, json={'ok': True, 'result': [{
+                'update_id': 43, 'message': {'from': {'id': 7}, 'chat': {'id': 7, 'type': 'private'},
+                                           'text': 'Draft a refund email'},
+            }]})
+        raise httpx2.ReadTimeout('uncertain delivery', request=request)
+    async def run() -> None:
+        nonlocal drafting
+        application = ApplicationService(FunctionModel(respond))
+        await application.run(OwnerTurn('bot:7', 'bot:7', 'create', 'Create a case called Kettle. It is broken.'))
+        case_id = (await application.store.list_cases('bot:7'))[0].id
+        drafting = True
+        async with httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http:
+            transport = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
+                                        turn_handler=application.run, identity='bot:7')
+            with pytest.raises(TelegramError):
+                await transport.poll_once()
+        restarted = ApplicationService(FunctionModel(respond))
+        assert 'version 1' in await restarted.run(OwnerTurn('bot:7', 'bot:7', 'telegram:43', 'Draft a refund email'))
+        assert len(await restarted.store.list_drafts('bot:7', case_id)) == 1
+        assert generations == 1 and PollingState(tmp_path).offset() == 44
+    asyncio.run(run())

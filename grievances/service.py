@@ -13,6 +13,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from core.turns import OwnerTurn
 from core.tracing import tracing
 from grievances import constants
+from grievances.drafts import DraftService
 from grievances.prompts import INTAKE_INSTRUCTIONS, SELECTED_INTAKE_INSTRUCTIONS
 from grievances.schema import IntakeAction
 from grievances.store import CaseStore
@@ -61,7 +62,7 @@ class ApplicationService:
             result = await self.agent.run(encoded, usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                                           timeout=constants.RUN_TIMEOUT_SECONDS)
         action = result.output
-        if action.action in ('show', 'update') and current:
+        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft') and current:
             messages: list[str] = []
             size = len(json.dumps(current.facts)) + len(turn.text)
             for message in reversed(current.messages):
@@ -78,7 +79,7 @@ class ApplicationService:
                 action = (await self.agent.run(selected_payload, instructions=SELECTED_INTAKE_INSTRUCTIONS, usage=usage,
                     usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                     timeout=constants.RUN_TIMEOUT_SECONDS)).output
-            if action.action not in ('show', 'update', 'clarify'):
+            if action.action not in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'clarify'):
                 return 'Please clarify the intended case action. Nothing changed.'
         if any(f.quote not in turn.text or f.value not in f.quote for f in action.facts):
             return 'I could not verify the supplied facts. Nothing changed; please state them explicitly.'
@@ -90,8 +91,16 @@ class ApplicationService:
         if action.correction_quote and (action.correction_quote not in turn.text or not re.search(
                 r'\b(correct(?:ion)?|replace|change|update|amend)\b', action.correction_quote, re.IGNORECASE)):
             return 'Please explicitly state the correction. Nothing changed.'
-        if action.action in ('show', 'update') and action.case_id and action.case_id != selection.case_id:
+        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft') and action.case_id and action.case_id != selection.case_id:
             return 'Please explicitly select the intended case first. Nothing changed.'
+        if action.action in ('draft', 'list_drafts', 'read_draft'):
+            if current is None:
+                return 'Please select the intended case before requesting drafts.'
+            if action.facts or action.correction_quote:
+                return 'Please save or correct the case facts first, then request the draft. No draft was saved.'
+            if action.action == 'draft':
+                return await DraftService(self.model, self.store).run(turn, selection, current, usage)
+            return await self.store.read_drafts(turn, selection, current, action.draft_version, listing=action.action == 'list_drafts')
         if action.action == 'memory':
             if action.facts or await self.store.contains_private_material(turn.owner_id, turn.text):
                 return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'

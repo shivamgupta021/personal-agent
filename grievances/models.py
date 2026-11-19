@@ -62,3 +62,19 @@ class CaseOperationReceipt(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['owner_id', 'conversation_id', 'delivery_id'], name='unique_case_delivery')]
+
+
+class ComplaintDraft(models.Model):
+    """Immutable text and source snapshot; usability is computed from current facts."""
+
+    case: models.ForeignKey[GrievanceCase, GrievanceCase] = models.ForeignKey(GrievanceCase, on_delete=models.CASCADE)
+    version: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    fact_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    operation: models.OneToOneField[CaseOperationReceipt, CaseOperationReceipt] = models.OneToOneField(CaseOperationReceipt, on_delete=models.CASCADE)
+    subject: models.TextField[str, str] = models.TextField()
+    body: models.TextField[str, str] = models.TextField()
+    missing_fields = models.JSONField(default=list)
+    created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['case', 'version'], name='unique_case_draft_version')]
