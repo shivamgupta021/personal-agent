@@ -7,6 +7,7 @@ from asgiref.sync import sync_to_async
 from django.db import transaction
 
 from core.turns import OwnerTurn
+from grievances.ownership import CaseOwnership
 from grievances.correspondence import ParsedCompanyReply
 from grievances.models import CaseOutcome, CompanyReply, CaseOperationReceipt, CaseSelection, ComplaintDraft, GrievanceCase, SentReport
 from grievances.store import CaseView, SelectionView
@@ -80,6 +81,9 @@ class ProgressStore:
 
     @staticmethod
     def _lock(turn: OwnerTurn, selection: SelectionView, current: CaseView) -> GrievanceCase:
+        owner = CaseOwnership.lock(turn.owner_id)
+        if owner.deletion_epoch != selection.deletion_epoch:
+            raise ProgressChanged
         selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
         case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=current.id).first()
         if case is not None and CaseOperationReceipt.objects.filter(owner_id=turn.owner_id,

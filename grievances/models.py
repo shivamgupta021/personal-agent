@@ -135,3 +135,31 @@ class CaseOutcome(models.Model):
     outcome: models.CharField[str, str] = models.CharField(max_length=32)
     owner_quote: models.TextField[str, str] = models.TextField()
     recorded_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+
+class CaseOwnerState(models.Model):
+    """Content-free serialization and invalidation boundary for one owner."""
+    owner_id: models.CharField[str, str] = models.CharField(max_length=128, primary_key=True)
+    deletion_epoch: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+
+
+class CaseTrace(models.Model):
+    """Single-case synthetic capture ownership; survives content deletion."""
+    owner_id: models.CharField[str, str] = models.CharField(max_length=128)
+    case_id: models.UUIDField[UUID, UUID] = models.UUIDField()
+    trace_id: models.CharField[str, str] = models.CharField(max_length=32, unique=True)
+    producer_closed: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    pending: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    observed: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    confirmed: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+
+
+class CaseTurnRegistration(models.Model):
+    """Remember when a delivery began without retaining its request or response."""
+    owner_id: models.CharField[str, str] = models.CharField(max_length=128)
+    conversation_id: models.CharField[str, str] = models.CharField(max_length=128)
+    delivery_id: models.CharField[str, str] = models.CharField(max_length=128)
+    deletion_epoch: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['owner_id', 'conversation_id', 'delivery_id'], name='unique_registered_case_turn')]

@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import re
 
@@ -12,7 +12,10 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.errors import ReplySavedDraftFailed
-from core.turns import OwnerTurn
+from core.turns import OwnerTurn, PreparedReply
+from grievances.ownership import CaseOwnership
+from grievances.deletion import CaseDeletionService
+from grievances.cleanup import CaseTraceCleanup
 from core.tracing import tracing
 from grievances import constants
 from grievances.correspondence import CompanyReplyParser
@@ -32,8 +35,9 @@ from conversations.memory import ConversationMemoryRunner
 
 
 class ApplicationService:
-    def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None, *, firecrawl: Firecrawl | None = None) -> None:
+    def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None, *, firecrawl: Firecrawl | None = None, trace_cleanup: CaseTraceCleanup | None = None) -> None:
         self.store = CaseStore()
+        self.deletion = CaseDeletionService(trace_cleanup)
         self.firecrawl = firecrawl
         self.model = model
         self.public_run = public_run
@@ -43,15 +47,37 @@ class ApplicationService:
         self.agent.instrument = tracing.private_instrumentation()
 
     async def run(self, turn: OwnerTurn) -> str:
+        return await (await self.prepare(turn)).render()
+
+    async def delete_case(self, turn: OwnerTurn, case_id: str) -> str:
+        return (await self.deletion.delete(turn, case_id)).message
+
+    async def prepare(self, turn: OwnerTurn) -> PreparedReply:
+        epoch = await CaseOwnership().begin(turn)
+        if epoch != await CaseOwnership().epoch(turn.owner_id):
+            text = 'This delivery predates case deletion; nothing was recreated. Please send a new request.'
+        else:
+            control = await self.deletion.control(turn)
+            if control is None:
+                text = await self._execute(turn, epoch)
+            else:
+                text = control.message
+                if control.deleted:
+                    epoch = await CaseOwnership().epoch(turn.owner_id)
+        async def valid() -> bool:
+            return epoch == await CaseOwnership().epoch(turn.owner_id)
+        return PreparedReply(text, valid)
+
+    async def _execute(self, turn: OwnerTurn, epoch: int) -> str:
         try:
             async with asyncio.timeout(constants.RUN_TIMEOUT_SECONDS):
-                return await self._run(turn)
+                return await self._run(turn, epoch)
         except (ModelAPIError, UnexpectedModelBehavior, UsageLimitExceeded, RunCancelled, TimeoutError):
             if await ProgressStore().reply_saved(turn):
                 raise ReplySavedDraftFailed from None
             raise
 
-    async def _run(self, turn: OwnerTurn) -> str:
+    async def _run(self, turn: OwnerTurn, epoch: int) -> str:
         if self.is_memory_control(turn.text):
             return await self.memory(turn)
         replay = await self.store.replay(turn)
@@ -60,7 +86,7 @@ class ApplicationService:
         if len(turn.text) > constants.MAX_INPUT_CHARS:
             return 'Please send a shorter case message. Nothing changed.'
         company_reply = CompanyReplyParser().parse(turn.text)
-        selection = await self.store.selection(turn.owner_id, turn.conversation_id)
+        selection = replace(await self.store.selection(turn.owner_id, turn.conversation_id), deletion_epoch=epoch)
         current = await self.store.get_case(turn.owner_id, selection.case_id) if selection.case_id else None
         brief = await PolicyStore().latest_brief(turn.owner_id, current.id) if current else None
         research_status = {'reviewed': brief is not None, 'confirmed': bool(brief and brief.confirmed),
@@ -106,6 +132,8 @@ class ApplicationService:
             return 'Company correspondence cannot authorize case changes or sending. Please save the quoted reply first; nothing was changed.'
         if any(f.quote not in turn.text or f.value not in f.quote for f in action.facts):
             return 'I could not verify the supplied facts. Nothing changed; please state them explicitly.'
+        if action.action == 'delete':
+            return 'Please explicitly say “Delete this case” or “Delete case LABEL”. Nothing changed.'
         if action.action in ('create', 'select', 'leave') and (not action.intent_quote or action.intent_quote not in turn.text):
             return 'Please explicitly state the case action. Nothing changed.'
         if action.action == 'create' and (not action.label.strip() or action.label not in turn.text
@@ -133,7 +161,8 @@ class ApplicationService:
                     refreshed = await self.store.get_case(turn.owner_id, current.id)
                     if refreshed is None:
                         return 'Company reply was saved, but the case is no longer available. No follow-up was saved.'
-                    draft_reply = await DraftService(self.model, self.store).run(turn.followup(), selection, refreshed, usage, follow_up=True)
+                    child = await CaseOwnership().followup(turn)
+                    draft_reply = await DraftService(self.model, self.store).run(child, selection, refreshed, usage, follow_up=True)
                     return saved.message + '\n' + draft_reply
                 if action.action in ('resolve', 'close_without_resolution'):
                     outcome = 'resolved' if action.action == 'resolve' else 'closed_without_resolution'
@@ -173,12 +202,14 @@ class ApplicationService:
             if action.action == 'draft':
                 return await DraftService(self.model, self.store).run(turn, selection, current, usage)
             return await self.store.read_drafts(turn, selection, current, action.draft_version, listing=action.action == 'list_drafts')
+        if action.action in ('memory', 'public') and not await self.store.general_allowed(turn, epoch):
+            return 'Case material cannot become general memory or public research. Please send a new independent request.'
         if action.action == 'memory':
-            if action.facts or await self.store.contains_private_material(turn.owner_id, turn.text):
+            if action.facts:
                 return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'
             return await self.memory(turn)
         if action.action == 'public':
-            if current or action.facts or await self.store.contains_private_material(turn.owner_id, turn.text):
+            if current or action.facts:
                 return 'Please explicitly return to general research and send a public question separately, or select a case.'
             return await self.public_run(turn.text) if self.public_run else 'Public research is unavailable in this session.'
         return await self.store.apply(turn, action, selection, current)
@@ -205,14 +236,29 @@ class SubscriptionApplicationService:
         self.public_run = public_run
 
     async def run(self, turn: OwnerTurn) -> str:
+        return await (await self.prepare(turn)).render()
+
+    async def prepare(self, turn: OwnerTurn) -> PreparedReply:
+        epoch = await CaseOwnership().begin(turn)
+        async def valid() -> bool:
+            return epoch == await CaseOwnership().epoch(turn.owner_id)
+        if epoch != await CaseOwnership().epoch(turn.owner_id):
+            return PreparedReply('This delivery predates deletion; nothing was recreated.', valid)
+        control = await CaseDeletionService().control(turn)
+        if control is not None:
+            if control.deleted:
+                epoch = await CaseOwnership().epoch(turn.owner_id)
+            return PreparedReply(control.message, valid)
         if ApplicationService.is_memory_control(turn.text):
             with tracing.operation('application.memory', {}, kind='agent', private=True):
-                return await self.public_run(turn.text)
+                return PreparedReply(await self.public_run(turn.text), valid)
         try:
             async with self.subscription.model() as model:
-                return await ApplicationService(model, self.defer_public).run(turn)
+                return await ApplicationService(model, self.defer_public).prepare(turn)
         except PublicResearchRequested:
-            return await self.public_run(turn.text)
+            if not await valid():
+                return PreparedReply('Case content was deleted. Please send a new public request.', valid)
+            return PreparedReply(await self.public_run(turn.text), valid)
 
     async def defer_public(self, message: str) -> str:
         raise PublicResearchRequested

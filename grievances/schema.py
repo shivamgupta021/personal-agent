@@ -19,7 +19,7 @@ class SuppliedFact(BaseModel):
 
 
 class IntakeAction(BaseModel):
-    action: Literal['create', 'list', 'select', 'show', 'update', 'leave', 'public', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
+    action: Literal['delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
     case_id: str = ''
     public_brief: 'PublicResearchBrief | None' = None
     draft_version: int | None = Field(default=None, ge=1)

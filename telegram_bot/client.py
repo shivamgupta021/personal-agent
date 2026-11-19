@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx2
 
+from core.turns import PreparedReply
+
 from telegram_bot.constants import MESSAGE_INTERVAL_SECONDS, MESSAGE_MAX_UTF16_UNITS, POLL_RETRY_SECONDS, POLL_TIMEOUT_SECONDS
 
 
@@ -43,14 +45,18 @@ class TelegramClient:
             raise TelegramError('Telegram returned invalid updates.')
         return result
 
-    async def send(self, chat_id: int, text: str) -> None:
-        while text:
-            chunk = text.encode('utf-16-le')[:MESSAGE_MAX_UTF16_UNITS * 2].decode('utf-16-le', errors='ignore')
-            if len(chunk) < len(text):
+    async def send(self, chat_id: int, text: str | PreparedReply) -> None:
+        prepared = text if isinstance(text, PreparedReply) else None
+        remaining = await prepared.render() if prepared else str(text)
+        while remaining:
+            chunk = remaining.encode('utf-16-le')[:MESSAGE_MAX_UTF16_UNITS * 2].decode('utf-16-le', errors='ignore')
+            if len(chunk) < len(remaining):
                 boundary = max(chunk.rfind('\n'), chunk.rfind(' '))
                 if boundary > 0:
                     chunk = chunk[:boundary + 1]
+            if prepared and not await prepared.valid():
+                return
             await self.request('sendMessage', {'chat_id': chat_id, 'text': chunk})
-            text = text[len(chunk):]
-            if text:
+            remaining = remaining[len(chunk):]
+            if remaining:
                 await asyncio.sleep(MESSAGE_INTERVAL_SECONDS)

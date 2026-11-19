@@ -7,6 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.turns import OwnerTurn
+from grievances.ownership import CaseOwnership
 from grievances.models import CaseOperationReceipt, CaseResearch, CaseResearchBrief, CaseSelection, GrievanceCase
 from grievances.policy_records import PolicySource, ResearchFinding
 from grievances.schema import PublicResearchBrief
@@ -64,6 +65,9 @@ class PolicyStore:
 
     @staticmethod
     def _lock(turn: OwnerTurn, selection: SelectionView, current: CaseView) -> GrievanceCase:
+        owner = CaseOwnership.lock(turn.owner_id)
+        if owner.deletion_epoch != selection.deletion_epoch:
+            raise PolicyStateChanged
         selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
         case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=current.id).first()
         if (case is None or case.revision != current.revision or selected.revision != selection.revision

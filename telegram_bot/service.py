@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from core.errors import user_error_message
-from core.turns import OwnerTurn
+from core.turns import OwnerTurn, PreparedReply
 
 from telegram_bot.client import TelegramClient, TelegramError
 from telegram_bot.state import PollingState
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class TelegramService:
     def __init__(self, client: TelegramClient, state: PollingState, owner_id: int,
-                 turn_handler: Callable[[OwnerTurn], Awaitable[str]], *, identity: str) -> None:
+                 turn_handler: Callable[[OwnerTurn], Awaitable[str | PreparedReply]], *, identity: str) -> None:
         self.client = client
         self.state = state
         self.owner_id = owner_id
