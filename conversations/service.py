@@ -7,6 +7,7 @@ from pydantic_ai.run import AgentRunResult
 
 from conversations.budget import ContextBudgetExceeded
 from conversations.context import ConversationContext
+from conversations.recall import ArchiveRecall
 from conversations.cleanup import TraceCleanup
 from conversations.constants import DELETE_CONVERSATION_PHRASES
 from conversations.store import ConversationStore
@@ -15,7 +16,7 @@ from core.tracing import tracing
 
 class ConversationRunner(Protocol):
     async def run_turn(self, message: str, context: ConversationContext,
-                       forget: Callable[[], Awaitable[str]]) -> AgentRunResult[str]: ...
+                       forget: Callable[[], Awaitable[str]], recall: ArchiveRecall) -> AgentRunResult[str]: ...
 
 
 class ConversationDeleted(Exception):
@@ -45,7 +46,7 @@ class ConversationService:
                 trace_id = format(span.get_span_context().trace_id, '032x')
                 if span.is_recording():
                     await self.store.track(self.identity, trace_id)
-                result = await self.runner.run_turn(message, context, self.forget_conversation)
+                result = await self.runner.run_turn(message, context, self.forget_conversation, ArchiveRecall(self.identity, self.store))
                 context.capture(result.all_messages())
                 await self.store.save(self.identity, result.all_messages(), context)
                 tracing.record_output(span, {'answer': result.output})

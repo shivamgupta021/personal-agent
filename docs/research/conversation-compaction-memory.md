@@ -113,3 +113,53 @@ now lives on `CompactionPart.metadata`, which survives normalization; original
 capture uses durable run history. The public-turn regression verifies all original
 pairs, cumulative resolvable source coverage, and removal of archive/summary records.
 Standards review found no issues; the spec review's validation finding was resolved.
+
+## Milestone #25 — bounded archival recall
+
+Added an on-demand `recall_conversation` tool scoped by the application conversation
+identity, never by a model-provided owner identifier. It searches original user and
+assistant text with case-insensitive keywords and returns newest-first evidence:
+message ID, timestamp, role, excerpt and truncation state. Limits are three searches
+per turn, five results per search, 500 characters per excerpt and 200 query characters.
+The existing assembled-request guard still applies after retrieval. No retrieval
+cache or extra service is introduced. Whole-conversation deletion removes originals
+and stored tool exchanges, and existing turn/trace associations cover recall spans.
+
+This is lexical recall, not semantic search. All query terms must occur in a message;
+excerpts surround the first keyword and can omit widely separated details. Narrower
+or reordered keywords may help. The application reads its local archive on demand;
+large-archive indexing is deferred. Prompt-based correction/ambiguity handling is not
+a guarantee of semantic correctness.
+
+A live long-history case initially hit the budget guard after retrieval. Inspection
+found repeated historical instructions were being counted alongside the active
+instruction parts, plus local provenance metadata. The pinned Pydantic model code
+uses `model_request_parameters.instruction_parts` when present, falling back to
+message instructions only when absent. The estimator now follows that distinction
+and excludes local metadata; it retains the same 48,000-byte guard and headroom.
+Smaller excerpts and a prompt clarification avoid repeated retrieval solely because
+an otherwise sufficient excerpt is marked truncated.
+
+Review found and fixed Unicode offset drift: case-folded string positions cannot be
+used to slice original text. Original-text match spans now locate excerpts. Typed
+result dataclasses preserve the repository's schema conventions.
+
+Validation: 64 tests pass; typechecking passes across 89 files; Django checks pass.
+Public Telegram-turn tests cover omitted facts after compaction/restart, original
+references, deletion/no resurrection, correction ordering, ambiguity, owner isolation,
+result and call bounds, and Unicode offsets. Controlled replies test orchestration;
+real-model experiments separately assess semantic behavior. Both review axes have no
+remaining findings. Run `uv run python manage.py evaluate_conversation --recall` to
+repeat the three hosted Langfuse cases; inspect cited source IDs, not just coarse scores.
+
+Final real-model experiment passed all three coarse checks and manual inspection:
+http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/experiments/results?baseline=c5ad713cab50650c
+The four-turn long-history case took 25.87s,
+with two prior summaries. Its recalled code and corrected budget cite IDs verified
+against original user messages. The trace contains two recall calls returning one
+and two excerpts respectively, each at most 500 characters, and no error observations.
+Missing evidence produced a question instead of an invented invoice; the ambiguous
+parcel case asked which parcel. These are limited synthetic acceptance cases, not a
+claim of general semantic recall accuracy.
+
+Trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/3e2c28e56e6692f98b7710c3409808c3

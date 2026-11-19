@@ -1,10 +1,8 @@
 import asyncio
 import json
 from pathlib import Path
-from collections.abc import Iterator
 
 from asgiref.sync import sync_to_async
-from django.db import connections
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 import httpx2
@@ -129,12 +127,6 @@ def test_oversized_follow_up_keeps_previous_context(tmp_path: Path, monkeypatch:
     assert 'saved history is unchanged' in replies[1]
     assert 'deleted locally' in replies[3]
     assert replies[4] == 'unknown'
-
-
-@pytest.fixture(autouse=True)
-def close_async_connections() -> Iterator[None]:
-    yield
-    asyncio.run(sync_to_async(connections.close_all)())
 
 
 @pytest.mark.django_db(transaction=True)
