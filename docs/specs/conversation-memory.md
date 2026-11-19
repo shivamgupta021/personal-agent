@@ -1,6 +1,6 @@
 # Persistent conversation, compaction, and explicit preferences
 
-Status: design and public test boundary approved on 18 November 2026. Implementation slices require separate approval. This is a scoped extension of the personal grievance assistant MVP, not authorization to implement all milestones together.
+Status: design and public test boundary approved on 18 November 2026; milestones #23–#27 implemented and merged under the owner’s subsequent authorization to complete the remaining tickets. The original design and historical decisions follow; this remains a scoped extension of the grievance MVP.
 
 Published as [GitHub issue #22](https://github.com/shivamgupta021/personal-agent/issues/22).
 
