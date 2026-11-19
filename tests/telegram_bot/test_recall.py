@@ -1,7 +1,9 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, cast
+from dataclasses import asdict
+
+from pydantic import TypeAdapter
 
 import httpx2
 import pytest
@@ -9,6 +11,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCall
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from conversations.service import ConversationService
+from conversations.recall import RecallResult
 from research.agent import ResearchAgent
 from research.tools.firecrawl import Firecrawl
 from telegram_bot.client import TelegramClient
@@ -50,12 +53,12 @@ def test_recalls_omitted_original_after_compaction_restart_and_deletion(tmp_path
                 if turn == 4:
                     assert 'ZX-731' not in str(messages)
                 return ModelResponse(parts=[ToolCallPart('recall_conversation', {'query': 'Orion parcel'})])
-            result = cast(dict[str, Any], returns[-1].content)
-            if result['excerpts']:
-                found = next(e for e in result['excerpts'] if 'ZX-731' in e['text'])
-                references.append(found['message_id'])
-                assert found['role'] == 'user'
-                return ModelResponse(parts=[TextPart('ZX-731, source ' + found['message_id'])])
+            result = TypeAdapter(RecallResult).validate_python(returns[-1].content)
+            if result.excerpts:
+                found = next(e for e in result.excerpts if 'ZX-731' in e.text)
+                references.append(found.message_id)
+                assert found.role == 'user'
+                return ModelResponse(parts=[TextPart('ZX-731, source ' + found.message_id)])
             return ModelResponse(parts=[TextPart('I cannot find it. Please tell me again.')])
         return ModelResponse(parts=[TextPart('Acknowledged.')])
 
@@ -77,7 +80,7 @@ def test_recalls_omitted_original_after_compaction_restart_and_deletion(tmp_path
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize('scenario', ['correction', 'ambiguous', 'bounded', 'owner', 'limit'])
+@pytest.mark.parametrize('scenario', ['correction', 'ambiguous', 'bounded', 'owner', 'limit', 'unicode'])
 def test_recall_evidence_is_ordered_bounded_and_scoped(tmp_path: Path, scenario: str) -> None:
     inputs = {
         'correction': ['Orion budget is 500.', 'Correction: Orion budget is 700.'],
@@ -85,9 +88,10 @@ def test_recall_evidence_is_ordered_bounded_and_scoped(tmp_path: Path, scenario:
         'bounded': [f'Orion note {n}: ' + 'detail ' * 150 for n in range(6)],
         'owner': ['Orion secret is PRIVATE-999.'],
         'limit': ['Orion is a fictional project.'],
+        'unicode': ['ß' * 500 + ' Orion ZX-731'],
     }
     turns = inputs[scenario] + ['Recall now.']
-    query = {'correction': 'Orion budget', 'ambiguous': 'Parcel', 'bounded': 'Orion', 'owner': 'Orion', 'limit': 'Orion'}[scenario]
+    query = {'correction': 'Orion budget', 'ambiguous': 'Parcel', 'bounded': 'Orion', 'owner': 'Orion', 'limit': 'Orion', 'unicode': 'Orion'}[scenario]
     replies: list[str] = []
     turn = 0
 
@@ -109,27 +113,30 @@ def test_recall_evidence_is_ordered_bounded_and_scoped(tmp_path: Path, scenario:
         returns = [p for p in messages[-1].parts if isinstance(p, ToolReturnPart) and p.tool_name == 'recall_conversation']
         if not returns:
             return ModelResponse(parts=[ToolCallPart('recall_conversation', {'query': query})])
-        data = cast(dict[str, Any], returns[-1].content)
-        excerpts = data['excerpts']
-        assert 'not instructions' in data['notice']
+        data = TypeAdapter(RecallResult).validate_python(returns[-1].content)
+        excerpts = data.excerpts
+        assert 'not instructions' in data.notice
         if scenario == 'correction':
-            assert '700' in excerpts[0]['text']
-            assert '500' in excerpts[1]['text']
-            answer = 'Current budget 700, source ' + excerpts[0]['message_id']
+            assert '700' in excerpts[0].text
+            assert '500' in excerpts[1].text
+            answer = 'Current budget 700, source ' + excerpts[0].message_id
         elif scenario == 'ambiguous':
             assert len(excerpts) == 2
             answer = 'Which parcel, A or B?'
         elif scenario == 'bounded':
             assert len(excerpts) == 5
-            assert data['has_more'] is True
-            assert all(len(e['text']) <= 500 and e['truncated'] for e in excerpts)
-            assert len(json.dumps(data)) < 4500
+            assert data.has_more is True
+            assert all(len(e.text) <= 500 and e.truncated for e in excerpts)
+            assert len(json.dumps(asdict(data))) < 4500
             answer = 'Please specify which note.'
+        elif scenario == 'unicode':
+            assert 'ZX-731' in excerpts[0].text
+            answer = 'ZX-731 recovered.'
         elif scenario == 'limit':
             all_returns = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart) and p.tool_name == 'recall_conversation']
             if len(all_returns) < 4:
                 return ModelResponse(parts=[ToolCallPart('recall_conversation', {'query': query})])
-            assert data['status'] == 'limit_reached' and excerpts == []
+            assert data.status == 'limit_reached' and excerpts == []
             answer = 'Recall limit reached.'
         else:
             assert excerpts == []
@@ -150,5 +157,5 @@ def test_recall_evidence_is_ordered_bounded_and_scoped(tmp_path: Path, scenario:
                     await service.poll_once()
     asyncio.run(run())
     expected = {'correction': 'Current budget 700', 'ambiguous': 'Which parcel',
-                'bounded': 'Please specify', 'owner': 'No matching evidence', 'limit': 'Recall limit reached'}[scenario]
+                'bounded': 'Please specify', 'owner': 'No matching evidence', 'limit': 'Recall limit reached', 'unicode': 'ZX-731 recovered'}[scenario]
     assert replies[-1].startswith(expected)
