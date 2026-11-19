@@ -8,8 +8,9 @@ from django.db import transaction
 
 from core.turns import OwnerTurn
 from grievances.constants import DRAFT_MATERIAL_FIELDS, MATERIAL_FIELDS
-from grievances.models import CaseFactRevision, CaseMessage, CaseOperationReceipt, CaseSelection, CompanyReply, SentReport, CaseResearch, CaseResearchBrief, ComplaintDraft, GrievanceCase
+from grievances.models import CaseOutcome, CaseFactRevision, CaseMessage, CaseOperationReceipt, CaseSelection, CompanyReply, SentReport, CaseResearch, CaseResearchBrief, ComplaintDraft, GrievanceCase
 from grievances.schema import IntakeAction
+from grievances.ownership import CaseOwnership
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class CaseSummary:
 class SelectionView:
     case_id: str | None
     revision: int
+    deletion_epoch: int = 0
 
 
 @dataclass(frozen=True)
@@ -84,8 +86,10 @@ class CaseStore:
 
     @sync_to_async
     def selection(self, owner_id: str, conversation_id: str) -> SelectionView:
-        row, _ = CaseSelection.objects.get_or_create(owner_id=owner_id, conversation_id=conversation_id)
-        return SelectionView(str(row.case_id) if row.case_id else None, row.revision)
+        with transaction.atomic():
+            owner = CaseOwnership.lock(owner_id)
+            row, _ = CaseSelection.objects.get_or_create(owner_id=owner_id, conversation_id=conversation_id)
+            return SelectionView(str(row.case_id) if row.case_id else None, row.revision, owner.deletion_epoch)
 
     @sync_to_async
     def get_case(self, owner_id: str, case_id: str) -> CaseView | None:
@@ -106,6 +110,16 @@ class CaseStore:
     @sync_to_async
     def contains_private_material(self, owner_id: str, text: str) -> bool:
         """Keep known private identifiers out of a mistakenly classified public turn."""
+        return self._contains_private_material(owner_id, text)
+
+    @sync_to_async
+    def general_allowed(self, turn: OwnerTurn, epoch: int) -> bool:
+        """Deletion and privacy classification share one short serialization boundary."""
+        with transaction.atomic():
+            owner = CaseOwnership.lock(turn.owner_id)
+            return owner.deletion_epoch == epoch and not self._contains_private_material(turn.owner_id, turn.text)
+
+    def _contains_private_material(self, owner_id: str, text: str) -> bool:
         candidate = text.casefold()
         for row in GrievanceCase.objects.filter(owner_id=owner_id):
             revisions = CaseFactRevision.objects.filter(case=row)
@@ -115,7 +129,17 @@ class CaseStore:
                                'amount_paid', 'refund_amount', 'purchase_date', 'delivery_date'):
                         if value and value.casefold() in candidate:
                             return True
-        return False
+        # Literal case-owned correspondence and generated text are private too,
+        # even when they introduce no structured order/address fact.
+        content = (
+            CaseMessage.objects.filter(case__owner_id=owner_id).values_list('text', flat=True),
+            CompanyReply.objects.filter(case__owner_id=owner_id).values_list('text', flat=True),
+            SentReport.objects.filter(case__owner_id=owner_id).values_list('details', flat=True),
+            ComplaintDraft.objects.filter(case__owner_id=owner_id).values_list('body', flat=True),
+            ComplaintDraft.objects.filter(case__owner_id=owner_id).values_list('subject', flat=True),
+            CaseOutcome.objects.filter(case__owner_id=owner_id).values_list('owner_quote', flat=True),
+        )
+        return any(value and value.casefold() in candidate for values in content for value in values)
 
     @sync_to_async
     def replay(self, turn: OwnerTurn) -> str | None:
@@ -144,6 +168,9 @@ class CaseStore:
     @sync_to_async
     def apply(self, turn: OwnerTurn, action: IntakeAction, selection: SelectionView, current: CaseView | None) -> str:
         with transaction.atomic():
+            owner = CaseOwnership.lock(turn.owner_id)
+            if owner.deletion_epoch != selection.deletion_epoch:
+                return 'Case content was deleted while this request was running. Nothing was saved.'
             selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
             receipt = CaseOperationReceipt.objects.filter(owner_id=turn.owner_id, conversation_id=turn.conversation_id,
                                                          delivery_id=turn.delivery_id).first()
@@ -266,6 +293,9 @@ class CaseStore:
     @sync_to_async
     def read_drafts(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, version: int | None, *, listing: bool) -> str:
         with transaction.atomic():
+            owner = CaseOwnership.lock(turn.owner_id)
+            if owner.deletion_epoch != selection.deletion_epoch:
+                return 'Case content was deleted while this request was running. Nothing was saved.'
             selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
             case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=current.id).first()
             if (selected.revision != selection.revision or str(selected.case_id) != current.id
@@ -284,6 +314,9 @@ class CaseStore:
     @sync_to_async
     def save_draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, content: DraftContent) -> str:
         with transaction.atomic():
+            owner = CaseOwnership.lock(turn.owner_id)
+            if owner.deletion_epoch != selection.deletion_epoch:
+                return 'Case content was deleted while this request was running. Nothing was saved.'
             selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
             receipt = CaseOperationReceipt.objects.filter(owner_id=turn.owner_id, conversation_id=turn.conversation_id, delivery_id=turn.delivery_id).first()
             if receipt:

@@ -44,4 +44,4 @@ class Command(BaseCommand):
             base_url=f'https://api.telegram.org/bot{token}/', timeout=HTTP_TIMEOUT_SECONDS,
             follow_redirects=False,
         ) as client:
-            await TelegramService(TelegramClient(client), state, owner_id, turn_handler=application.run, identity=owner_identity).run()
+            await TelegramService(TelegramClient(client), state, owner_id, turn_handler=application.prepare, identity=owner_identity).run()

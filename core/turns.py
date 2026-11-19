@@ -1,5 +1,6 @@
 """Transport-normalized authenticated input; delivery identities survive retries."""
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -22,3 +23,16 @@ class OwnerTurn:
         """A bounded, stable generation phase for an already saved reply delivery."""
         return OwnerTurn(self.owner_id, self.conversation_id,
                          'followup:' + sha256(self.delivery_id.encode()).hexdigest(), self.text)
+
+
+@dataclass(frozen=True)
+class PreparedReply:
+    """Response with a fresh authorization check at each external handoff."""
+    text: str
+    check: Callable[[], Awaitable[bool]]
+
+    async def valid(self) -> bool:
+        return await self.check()
+
+    async def render(self) -> str:
+        return self.text if await self.valid() else 'Case content changed or was deleted; nothing was recreated. Please send a new request.'
