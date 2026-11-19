@@ -9,6 +9,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from conversations.compaction import ConversationCompaction
 from conversations.context import ConversationContext
 from conversations.recall import ArchiveRecall
+from conversations.facts import FactCleanup, FactEditor
 from conversations.constants import MAX_OUTPUT_TOKENS
 from conversations.prompts import CONVERSATION_INSTRUCTIONS
 from pydantic_ai.models import Model
@@ -27,6 +28,7 @@ class ResearchAgent:
         simple_model: Model | None = None, complex_model: Model | None = None,
         *, use_query_planners: bool = False,
     ) -> None:
+        self.model = model
         tools = [Tool(firecrawl.search), Tool(firecrawl.read_page)]
         instructions = DIRECT_RESEARCH_INSTRUCTIONS
         if use_query_planners:
@@ -56,12 +58,12 @@ class ResearchAgent:
         return result.output
 
     async def run_turn(self, message: str, context: ConversationContext,
-                       forget: Callable[[], Awaitable[str]], recall: ArchiveRecall) -> AgentRunResult[str]:
+                       forget: Callable[[], Awaitable[str]], recall: ArchiveRecall, facts: FactCleanup) -> AgentRunResult[str]:
         return await self.agent.run(
             message, message_history=context.messages,
             instructions=CONVERSATION_INSTRUCTIONS,
             capabilities=[ConversationCompaction(context)],
-            toolsets=[FunctionToolset(tools=[Tool(forget, name='forget_conversation'), Tool(recall.recall_conversation)])],
+            toolsets=[FunctionToolset(tools=[Tool(forget, name='forget_conversation'), Tool(recall.recall_conversation), Tool(FactEditor(self.model, facts).edit_conversation_fact)])],
             usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS,
                                      tool_calls_limit=constants.MAX_TOOL_CALLS),
             model_settings={'max_tokens': MAX_OUTPUT_TOKENS},

@@ -7,6 +7,7 @@ from django.conf import settings
 from pydantic_ai.models import Model
 from conversations.context import ConversationContext
 from conversations.recall import ArchiveRecall
+from conversations.facts import FactCleanup
 from pydantic_ai.run import AgentRunResult
 
 from research.agent import ResearchAgent
@@ -44,11 +45,11 @@ class ResearchService:
         ).run(message)
 
     async def run_turn(self, message: str, context: ConversationContext,
-                       forget: Callable[[], Awaitable[str]], recall: ArchiveRecall) -> AgentRunResult[str]:
+                       forget: Callable[[], Awaitable[str]], recall: ArchiveRecall, facts: FactCleanup) -> AgentRunResult[str]:
         headers = {'Authorization': f'Bearer {settings.FIRECRAWL_API_KEY}'} if settings.FIRECRAWL_API_KEY else {}
         async with (
             self.subscription.model(DEFAULT_MODEL) as model,
             httpx2.AsyncClient(base_url=settings.FIRECRAWL_BASE_URL,
                               headers=headers, follow_redirects=False) as client,
         ):
-            return await ResearchAgent(model, Firecrawl(client)).run_turn(message, context, forget, recall)
+            return await ResearchAgent(model, Firecrawl(client)).run_turn(message, context, forget, recall, facts)
