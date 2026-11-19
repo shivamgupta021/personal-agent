@@ -489,3 +489,35 @@ uv run python manage.py evaluate_grievances --progress --scenario replacement_fo
 Review the saved letter and company attribution alongside the coarse state/version scores.
 Controlled database tests separately cover failed generation, duplicate delivery and stale
 results during corrections; a passing model example does not replace those checks.
+
+### Deleting a grievance case
+
+Use an explicit case name, for example `Delete the Lumen kettle case.` Ambiguous or quoted
+company instructions do not authorize deletion. The local transaction removes case facts and
+history, messages, all draft versions, research, sent reports, company replies and outcomes.
+Other cases and independently saved preferences remain. Old delivery receipts retain only the
+minimal identity needed to prevent replay from recreating deleted content.
+
+Deletion invalidates prepared replies and in-flight case work. Telegram checks again before
+each message chunk; content already handed to Telegram cannot be recalled by this operation.
+There is no claim to remove model-provider copies or independently made backups.
+
+Production case traces remain metadata-only. Explicitly registered synthetic case-content
+traces have a separate cleanup status: local deletion succeeds even when Langfuse is
+unavailable. Say `retry case trace cleanup` to retry pending cleanup. Confirmation requires
+closed/flushed producers, previously observed trace data, then observed absence through the
+observations API. An accepted DELETE or a legacy endpoint's 404 alone is insufficient.
+[Langfuse documents asynchronous trace deletion](https://langfuse.com/docs/administration/data-deletion#trace-deletion-limitations).
+
+Developer evaluation datasets contain independently authored fictional fixtures; real case
+content is never imported into those datasets. Deletion experiments publish checks rather than
+copies of the removed runtime case. Runtime trace deletion does not delete unrelated datasets.
+
+```sh
+uv run python manage.py evaluate_grievances --deletion
+uv run python manage.py evaluate_grievances --deletion --scenario complete_graph
+```
+
+These experiments use fictional data and fixed HTTP sources, verify every case-owned content
+table is empty after removal, and check that the other case and saved preference remain.
+Race, transport and cleanup-failure tests run separately from real-model examples.

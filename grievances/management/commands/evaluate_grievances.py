@@ -12,25 +12,28 @@ from grievances.evaluation import IntakeExperiment
 from grievances.draft_evaluation import DraftExperiment
 from grievances.policy_evaluation import PolicyExperiment
 from grievances.progress_evaluation import ProgressExperiment
+from grievances.deletion_evaluation import DeletionExperiment
 
 
 class Command(BaseCommand):
     help = 'Run real-model synthetic grievance experiments; no external actions.'
 
     def add_arguments(self, parser: CommandParser) -> None:
-        parser.add_argument('--scenario', choices=(*PolicyExperiment.CASES, *ProgressExperiment.CASES), help='Run one dataset item; requires --policy or --progress.')
+        parser.add_argument('--scenario', choices=(*PolicyExperiment.CASES, *ProgressExperiment.CASES, *DeletionExperiment.CASES), help='Run one dataset item; requires --policy, --progress or --deletion.')
         group = parser.add_mutually_exclusive_group()
+        group.add_argument('--deletion', action='store_true', help='Evaluate case deletion and preservation with fictional data.')
         group.add_argument('--progress', action='store_true', help='Evaluate manual sent reports, replies and follow-ups.')
         group.add_argument('--policy', action='store_true', help='Evaluate official policy evidence with fixed HTTP sources.')
         group.add_argument('--drafts', action='store_true', help='Evaluate factual draft versions instead of intake.')
 
     def handle(self, *args: Any, **options: Any) -> None:
-        if options['scenario'] and not (options['policy'] or options['progress']):
-            raise CommandError('--scenario requires --policy or --progress.')
+        if options['scenario'] and not (options['policy'] or options['progress'] or options['deletion']):
+            raise CommandError('--scenario requires --policy, --progress or --deletion.')
         if not settings.LANGFUSE_PUBLIC_KEY or not settings.LANGFUSE_SECRET_KEY:
             raise CommandError('Configure both Langfuse project keys first.')
         try:
-            experiment = (ProgressExperiment(options['scenario']) if options['progress'] else
+            experiment = (DeletionExperiment(options['scenario']) if options['deletion'] else
+                          ProgressExperiment(options['scenario']) if options['progress'] else
                           PolicyExperiment(options['scenario']) if options['policy'] else
                           DraftExperiment() if options['drafts'] else IntakeExperiment())
             report = experiment.run()
