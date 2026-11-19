@@ -291,7 +291,7 @@ def test_summary_failure_keeps_saved_context_and_only_continues_within_budget(tm
     def telegram(request: httpx2.Request) -> httpx2.Response:
         nonlocal turn
         if request.url.path.endswith('getUpdates'):
-            text = ('My code is teal. ' if turn == 0 else 'Continue. ') + 'background ' * 1000
+            text = ('My code is teal. ' if turn == 0 else 'Continue. ') + 'background ' * 1200
             turn += 1
             if turn == 4:
                 text = 'What is my code?'

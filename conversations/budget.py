@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 import json
+from typing import Any
 
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ModelMessagesTypeAdapter
@@ -18,7 +19,14 @@ class ContextBudgetExceeded(Exception):
 class ConversationBudget(AbstractCapability[None]):
     @staticmethod
     def size(request_context: ModelRequestContext) -> int:
-        messages = ModelMessagesTypeAdapter.dump_json(request_context.messages)
+        # Normal agent requests carry active instructions in instruction_parts below.
+        # Historical per-message instructions and local provenance are not model input.
+        excluded: dict[str, Any] = {'metadata': True, 'parts': {'__all__': {'metadata'}}}
+        if request_context.model_request_parameters.instruction_parts is not None:
+            excluded['instructions'] = True
+        messages = ModelMessagesTypeAdapter.dump_json(
+            request_context.messages, exclude={'__all__': excluded},
+        )
         parameters = json.dumps(asdict(request_context.model_request_parameters), default=str).encode()
         return len(messages) + len(parameters) + constants.REQUEST_HEADROOM
 
