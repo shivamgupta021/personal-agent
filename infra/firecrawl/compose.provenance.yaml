@@ -1,0 +1,12 @@
+# Merge with the existing compose file; no ports, environment, security or volumes change.
+services:
+  api:
+    image: personal-agent-firecrawl-api:provenance-v1
+    build:
+      context: ${PERSONAL_AGENT_FIRECRAWL_CONTEXT:?Set the absolute infra/firecrawl directory}
+      dockerfile: api.Dockerfile
+  browser:
+    image: personal-agent-firecrawl-browser:provenance-v1
+    build:
+      context: ${PERSONAL_AGENT_FIRECRAWL_CONTEXT:?Set the absolute infra/firecrawl directory}
+      dockerfile: browser.Dockerfile
