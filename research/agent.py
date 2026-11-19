@@ -15,6 +15,8 @@ from conversations.prompts import CONVERSATION_INSTRUCTIONS
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
+from preferences.service import PreferenceService
+
 from research import constants
 from research.tools.firecrawl import Firecrawl
 from research.tools.search import ResearchSearch
@@ -59,11 +61,13 @@ class ResearchAgent:
 
     async def run_turn(self, message: str, context: ConversationContext,
                        forget: Callable[[], Awaitable[str]], recall: ArchiveRecall, facts: FactCleanup) -> AgentRunResult[str]:
+        preferences = PreferenceService(self.model, facts)
+        preference_instructions = await preferences.instructions()
         return await self.agent.run(
             message, message_history=context.messages,
-            instructions=CONVERSATION_INSTRUCTIONS,
+            instructions=CONVERSATION_INSTRUCTIONS + preference_instructions,
             capabilities=[ConversationCompaction(context)],
-            toolsets=[FunctionToolset(tools=[Tool(forget, name='forget_conversation'), Tool(recall.recall_conversation), Tool(FactEditor(self.model, facts).edit_conversation_fact)])],
+            toolsets=[FunctionToolset(tools=[Tool(preferences.manage_preferences), Tool(forget, name='forget_conversation'), Tool(recall.recall_conversation), Tool(FactEditor(self.model, facts).edit_conversation_fact)])],
             usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS,
                                      tool_calls_limit=constants.MAX_TOOL_CALLS),
             model_settings={'max_tokens': MAX_OUTPUT_TOKENS},

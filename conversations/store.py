@@ -1,6 +1,7 @@
 """Atomic persistence; failed model runs never overwrite completed context."""
 
 from typing import Any
+from collections.abc import Callable
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
@@ -26,11 +27,14 @@ class ConversationStore:
         return dict(record.archive) if record else {}
 
     @sync_to_async
-    def save(self, identity: str, messages: list[ModelMessage], context: ConversationContext) -> None:
+    def save(self, identity: str, messages: list[ModelMessage], context: ConversationContext,
+             mutation: Callable[[], None] | None = None) -> None:
         with transaction.atomic():
             record = ConversationRecord.objects.select_for_update().filter(identity=identity, pk=context.record_id).first()
             if record is None or record.revision != context.revision:
                 raise ContextChanged
+            if mutation is not None:
+                mutation()
             archive = dict(record.archive)
             # Existing pre-compaction records are captured on their first continued run.
             archive.update({key: ModelMessagesTypeAdapter.dump_python([message], mode='json')[0]
@@ -45,11 +49,14 @@ class ConversationStore:
 
     @sync_to_async
     def replace_facts(self, identity: str, context: ConversationContext,
-                      originals: list[ModelMessage], history: list[ModelMessage]) -> None:
+                      originals: list[ModelMessage], history: list[ModelMessage],
+                      mutation: Callable[[], None] | None = None) -> None:
         with transaction.atomic():
             record = ConversationRecord.objects.select_for_update().filter(identity=identity, pk=context.record_id).first()
             if record is None or record.revision != context.revision:
                 raise ContextChanged
+            if mutation is not None:
+                mutation()
             encoded = ModelMessagesTypeAdapter.dump_python(originals, mode='json')
             record.archive = {message['metadata']['archive_id']: message for message in encoded}
             record.history = ModelMessagesTypeAdapter.dump_python(history, mode='json')

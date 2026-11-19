@@ -2,6 +2,7 @@
 
 import asyncio
 from copy import deepcopy
+from collections.abc import Callable
 from dataclasses import dataclass
 import json
 from typing import Annotated, Literal, Any
@@ -179,7 +180,7 @@ class FactCleanup:
             history = candidate
         return history
 
-    async def apply(self, messages: list[ModelMessage], intent: EditIntent, *, matched: bool = True) -> None:
+    async def apply(self, messages: list[ModelMessage], intent: EditIntent, *, matched: bool = True, mutation: Callable[[], None] | None = None) -> None:
         messages = [message for message in messages if any(
             isinstance(part, (ToolCallPart, ToolReturnPart)) or
             (isinstance(part, (UserPromptPart, TextPart)) and part.content) for part in message.parts)]
@@ -187,7 +188,7 @@ class FactCleanup:
             message.metadata = {'archive_id': (message.metadata or {})['archive_id']}
         if intent.action == 'correct':
             messages.append(ModelRequest(parts=[UserPromptPart(intent.replacement)], metadata={'archive_id': uuid4().hex}))
-        commit = asyncio.create_task(self.store.replace_facts(self.identity, self.context, messages, self.recent(messages)))
+        commit = asyncio.create_task(self.store.replace_facts(self.identity, self.context, messages, self.recent(messages), mutation))
         try:
             await asyncio.shield(commit)
         except asyncio.CancelledError:

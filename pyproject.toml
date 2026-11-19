@@ -33,4 +33,4 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["conversations", "config", "core", "research", "subscriptions", "telegram_bot", "tests", "manage.py"]
+files = ["preferences", "conversations", "config", "core", "research", "subscriptions", "telegram_bot", "tests", "manage.py"]
