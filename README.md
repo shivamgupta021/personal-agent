@@ -339,3 +339,28 @@ uv run python manage.py evaluate_conversation --facts
 
 Those experiments use separate trace roots for each application turn, so an open
 experiment parent cannot recreate a deleted trace containing an earlier synthetic fact.
+
+### Explicit saved preferences
+
+Manage preferences in ordinary conversation: “Remember that I prefer concise
+replies”, “What preferences have you saved?”, “Change my usual reply style to
+detailed”, or “Forget my reply-style preference.” A temporary instruction such as
+“For this answer only, be detailed” stays in conversation context and does not
+change the saved preference. Ambiguous intent should produce a clarification.
+
+Preferences persist separately from conversation history. Deleting the whole
+conversation does not delete independently saved preferences. Forgetting a
+preference removes its saved record and sanitizes relevant conversation copies
+using the same bounded cleanup and trace-deletion path described above. A saved
+change remains saved if Telegram cannot deliver the confirmation; inspect current
+preferences after an interrupted or uncertain reply.
+
+Rerun the real-model consent, exception, approval and lifecycle experiment after
+changing preference prompts or model settings:
+
+```bash
+uv run python manage.py evaluate_conversation --preferences
+```
+
+Its scores check stored state and local redaction. Review the actual replies and
+clarification behavior in the linked Langfuse experiment as well.
