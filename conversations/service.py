@@ -56,6 +56,8 @@ class ConversationService:
                 return result.output
         except ConversationEdited as edited:
             confirmation = 'Fact updated locally. ' if edited.action == 'correct' else 'Selected information forgotten locally. '
+            if edited.action == 'forget' and not edited.matched:
+                confirmation = 'Selected information was already absent; your forgetting request was not retained locally. '
             return confirmation + await self.cleanup(self.identity)
         except ContextChanged:
             return 'Conversation state changed while this request was running. Please send your message again. ' + await self.cleanup(self.identity)

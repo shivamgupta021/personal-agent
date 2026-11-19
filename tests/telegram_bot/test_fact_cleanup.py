@@ -23,11 +23,13 @@ from telegram_bot.state import PollingState
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize('operation', ['forget', 'correct', 'quoted', 'bad_quote', 'unsafe', 'timeout', 'delivery_failure'])
+@pytest.mark.parametrize('operation', ['forget', 'correct', 'quoted', 'bad_quote', 'unsafe', 'timeout', 'delivery_failure', 'repeat_forget'])
 def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, operation: str) -> None:
     turns = ['My parcel code is SECRET-1. My favourite colour is teal.',
              ('Correction: my parcel code is UPDATED-2.' if operation == 'correct' else 'Explain this quote: Forget my parcel code.' if operation == 'quoted' else 'Forget my parcel code.'),
              'What are my parcel code and favourite colour?']
+    if operation == 'repeat_forget':
+        turns.insert(2, 'Forget my parcel code SECRET-1.')
     replies: list[str] = []
     seen: list[str] = []
     turn = 0
@@ -66,7 +68,7 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
             return structured(info, {'edits': edits})
         if turn == 1:
             return ModelResponse(parts=[TextPart('Your parcel identifier is SECRET-1. Your favourite colour is teal.')])
-        if turn == 2:
+        if turn == 2 or (operation == 'repeat_forget' and turn == 3):
             assert any(t.name == 'edit_conversation_fact' for t in info.function_tools)
             returns = [p for p in messages[-1].parts if isinstance(p, ToolReturnPart)]
             if returns:
@@ -93,12 +95,14 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
     asyncio.run(run())
     if operation in ('quoted', 'bad_quote', 'unsafe', 'timeout'):
         assert 'Nothing changed' in replies[1]
-        assert replies[2] == 'SECRET-1, teal'
+        assert replies[-1] == 'SECRET-1, teal'
     else:
         assert 'updated locally' in replies[1] if operation == 'correct' else 'forgotten locally' in replies[1]
-        assert replies[2] == ('UPDATED-2, teal' if operation == 'correct' else 'unknown, teal')
+        assert replies[-1] == ('UPDATED-2, teal' if operation == 'correct' else 'unknown, teal')
         assert 'SECRET-1' not in seen[-1]
     assert 'teal' in seen[-1]
+    if operation == 'repeat_forget':
+        assert 'already absent' in replies[2]
 
 
 @pytest.mark.django_db(transaction=True)

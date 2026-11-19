@@ -50,8 +50,9 @@ class EditResult:
 
 
 class ConversationEdited(Exception):
-    def __init__(self, action: Literal['forget', 'correct']) -> None:
+    def __init__(self, action: Literal['forget', 'correct'], matched: bool = True) -> None:
         self.action = action
+        self.matched = matched
         super().__init__('Conversation content edited')
 
 
@@ -89,7 +90,7 @@ class FactCleanup:
             return message.timestamp.isoformat()
         return next(p.timestamp.isoformat() for p in message.parts if isinstance(p, UserPromptPart))
 
-    async def apply(self, messages: list[ModelMessage], intent: EditIntent) -> None:
+    async def apply(self, messages: list[ModelMessage], intent: EditIntent, *, matched: bool = True) -> None:
         messages = [message for message in messages if any(
             isinstance(part, (UserPromptPart, TextPart)) and part.content for part in message.parts)]
         if intent.action == 'correct':
@@ -102,7 +103,7 @@ class FactCleanup:
             history = candidate
         await self.store.replace_facts(self.identity, self.context, messages, history)
         if intent.action in ('forget', 'correct'):
-            raise ConversationEdited(intent.action)
+            raise ConversationEdited(intent.action, matched)
 
 
 class FactEditor:
@@ -186,5 +187,5 @@ class FactEditor:
             part = messages[index].parts[part_index]
             if isinstance(part, (UserPromptPart, TextPart)):
                 part.content = text.strip()
-        await self.cleanup.apply(messages, intent)
+        await self.cleanup.apply(messages, intent, matched=bool(planned))
         return EditResult('unchanged', 'Nothing was changed.')
