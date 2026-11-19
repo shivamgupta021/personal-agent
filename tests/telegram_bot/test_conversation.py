@@ -9,9 +9,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 import httpx2
 import pytest
-from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+from conversations.models import ConversationRecord, ConversationSummary
 from conversations.service import ConversationService
 from conversations import constants
 from conversations.cleanup import TraceCleanup
@@ -222,3 +223,152 @@ def test_trace_cleanup_failure_is_retryable_without_restoring_history(tmp_path: 
         assert requested[:1] == requested[1:]
     finally:
         tracing.shutdown()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_compaction_preserves_early_fact_across_restart(tmp_path: Path) -> None:
+    replies: list[str] = []
+    turn = 0
+    summaries = 0
+
+    def telegram(request: httpx2.Request) -> httpx2.Response:
+        nonlocal turn
+        if request.url.path.endswith('getUpdates'):
+            text = ('My code is indigo. ' if turn == 0 else 'Continue. ') + 'background ' * 1200
+            turn += 1
+            if turn == 6:
+                text = 'What is my code?'
+            if turn == 7:
+                text = 'Delete this entire conversation.'
+            if turn == 8:
+                text = 'What is my code?'
+            return httpx2.Response(200, json={'ok': True, 'result': [{
+                'update_id': turn, 'message': {'from': {'id': 7}, 'chat': {'id': 7, 'type': 'private'}, 'text': text},
+            }]})
+        replies.append(json.loads(request.content)['text'])
+        return httpx2.Response(200, json={'ok': True, 'result': {}})
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal summaries
+        if 'context summarization assistant' in str(info):
+            summaries += 1
+            return ModelResponse(parts=[TextPart('The user code is indigo. No outstanding research.')])
+        return ModelResponse(parts=[TextPart('indigo' if 'indigo' in str(messages) else 'unknown')])
+
+    @sync_to_async
+    def verify_persisted_state() -> None:
+        if turn == 6:
+            record = ConversationRecord.objects.get(identity='compaction-test')
+            snapshots = list(ConversationSummary.objects.filter(conversation=record).order_by('pk'))
+            assert len(snapshots) >= 2
+            assert len(record.archive) == 12  # All six completed user/assistant pairs.
+            assert 'My code is indigo.' in json.dumps(record.archive)
+            previous_sources: set[str] = set()
+            for summary in snapshots:
+                sources = summary.snapshot['metadata']['summary_sources']
+                assert sources
+                assert previous_sources <= set(sources) <= record.archive.keys()
+                previous_sources = set(sources)
+        if turn == 7:
+            assert not ConversationRecord.objects.filter(identity='compaction-test').exists()
+            assert not ConversationSummary.objects.exists()
+
+    async def run() -> None:
+        async with (
+            httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http,
+            httpx2.AsyncClient(transport=httpx2.MockTransport(lambda r: httpx2.Response(500))) as web,
+        ):
+            for _ in range(8):
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
+                    ConversationService('compaction-test', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
+                with service.state.locked():
+                    await service.poll_once()
+                await verify_persisted_state()
+    asyncio.run(run())
+    assert replies[:6] == ['indigo'] * 6
+    assert 'deleted locally' in replies[6]
+    assert replies[7] == 'unknown'
+    assert summaries >= 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_summary_failure_keeps_saved_context_and_only_continues_within_budget(tmp_path: Path) -> None:
+    replies: list[str] = []
+    turn = 0
+
+    def telegram(request: httpx2.Request) -> httpx2.Response:
+        nonlocal turn
+        if request.url.path.endswith('getUpdates'):
+            text = ('My code is teal. ' if turn == 0 else 'Continue. ') + 'background ' * 1200
+            turn += 1
+            if turn == 4:
+                text = 'What is my code?'
+            return httpx2.Response(200, json={'ok': True, 'result': [{
+                'update_id': turn, 'message': {'from': {'id': 7}, 'chat': {'id': 7, 'type': 'private'}, 'text': text},
+            }]})
+        replies.append(json.loads(request.content)['text'])
+        return httpx2.Response(200, json={'ok': True, 'result': {}})
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if 'context summarization assistant' in str(info):
+            raise TimeoutError('simulated summary outage')
+        return ModelResponse(parts=[TextPart('teal' if 'teal' in str(messages) else 'unknown')])
+
+    async def run() -> None:
+        async with (
+            httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http,
+            httpx2.AsyncClient(transport=httpx2.MockTransport(lambda r: httpx2.Response(500))) as web,
+        ):
+            for _ in range(4):
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
+                    ConversationService('failed-compaction', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
+                with service.state.locked():
+                    await service.poll_once()
+    asyncio.run(run())
+    assert replies[0] == replies[1] == replies[3] == 'teal'
+    assert 'saved history is unchanged' in replies[2]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_large_tool_result_compacts_between_calls_without_orphaning_tools(tmp_path: Path) -> None:
+    replies: list[str] = []
+    turn = 0
+    summary_calls = 0
+
+    def telegram(request: httpx2.Request) -> httpx2.Response:
+        nonlocal turn
+        if request.url.path.endswith('getUpdates'):
+            text = 'My code is gold. Acknowledge. ' + 'background ' * 1500 if turn == 0 else 'Read https://example.com/policy and recall my code.'
+            turn += 1
+            return httpx2.Response(200, json={'ok': True, 'result': [{
+                'update_id': turn, 'message': {'from': {'id': 7}, 'chat': {'id': 7, 'type': 'private'}, 'text': text},
+            }]})
+        replies.append(json.loads(request.content)['text'])
+        return httpx2.Response(200, json={'ok': True, 'result': {}})
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal summary_calls
+        if 'context summarization assistant' in str(info):
+            summary_calls += 1
+            return ModelResponse(parts=[TextPart('The user code is gold. Read the policy; evidence remains unverified.')])
+        calls = {p.tool_call_id for m in messages for p in m.parts if isinstance(p, ToolCallPart)}
+        returns = {p.tool_call_id for m in messages for p in m.parts if isinstance(p, ToolReturnPart)}
+        assert returns <= calls
+        if turn == 2 and not returns:
+            return ModelResponse(parts=[ToolCallPart('read_page', {'url': 'https://example.com/policy'})])
+        return ModelResponse(parts=[TextPart('gold' if 'gold' in str(messages) else 'unknown')])
+
+    async def run() -> None:
+        async with (
+            httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http,
+            httpx2.AsyncClient(base_url='https://firecrawl.invalid', transport=httpx2.MockTransport(
+                lambda r: httpx2.Response(200, json={'success': True, 'data': {'markdown': 'Policy detail. ' * 1200}}))) as web,
+        ):
+            for _ in range(2):
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
+                    ConversationService('tool-compaction', ResearchAgent(FunctionModel(model), Firecrawl(web))).run)
+                with service.state.locked():
+                    await service.poll_once()
+    asyncio.run(run())
+    assert replies == ['gold', 'gold']
+    assert summary_calls >= 1

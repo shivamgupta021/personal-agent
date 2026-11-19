@@ -62,3 +62,54 @@ These are project-specific deductions, not framework guarantees:
 3. Measure compaction fidelity, latency, and total tokens, including summarization. Select conservative configurable budgets using evidence rather than arbitrary message counts.
 
 Acceptance research should compare repeated compactions against full-history answers using synthetic cases: corrected early facts, exact source references, huge tool results, pending tools, restart, case isolation, and deletion without resurrection. Measure accuracy, provenance, total tokens including summarization, and latency. The existing MVP spec is an input to reconcile during grilling, not authorization to settle these questions here.
+
+## Milestone #24 implementation evidence — 18 November 2026
+
+Installed and exercised `pydantic-ai-harness==0.69.0` with the existing
+`pydantic-ai-slim==2.69.0`. The public `SummarizingCompaction.before_model_request`
+capability handles tool-safe retention and anchored incremental summaries. Its nested
+summary agent uses the existing model connection, contributes to shared request/usage
+limits, and emits native agent/generation spans. No provider-native `/compact` API is
+required. The subscription route successfully generated summaries in a real run.
+
+Application policy wraps that capability: trigger at 32,000 serialized request bytes,
+retain at least 6,000 content bytes of recent messages (whole tool dependencies may
+expand this), and enforce the existing 48,000-byte hard guard after compaction.
+The summary call has its own hard input guard, a 45-second timeout, 1,500 output-token
+cap, no output retries, and at most two compaction attempts per turn. Tool evidence is
+not truncated before summarization. These conservative byte estimates are not exact
+provider token counts. An oversized protected tail fails visibly rather than losing facts.
+
+Original messages carry stable local archive identifiers. Successful turns atomically
+save the original-message archive, reduced active context, and summary snapshots with
+source identifiers; failed turns leave committed state unchanged. Whole-conversation
+deletion cascades to summary snapshots, and nested summary traces share the recorded
+turn trace for deletion. Archival recall remains milestone #25.
+
+Validation: all 57 tests, Django checks, and typechecking (87 files) passed.
+Controlled Telegram-turn tests cover repeated compaction across service restarts,
+summary failures below/above the hard limit, large tool results with complete tool
+pairs, oversized input, and whole-conversation deletion.
+
+A four-turn real-model comparison retained the corrected budget (700), unresolved
+vendor selection, project name, and exact fictional source URL on both paths:
+
+| Path | Summary calls | Total generation tokens | Four-turn elapsed |
+| --- | ---: | ---: | ---: |
+| Automatic compaction | 2 | 9,955 | 24.21 seconds |
+| Full history | 0 | 12,053 | 13.83 seconds |
+
+Tokens sum every generation, including both summarizers. This single synthetic case
+shows a latency tradeoff, not a general speed or quality benchmark. Both coarse
+checks passed and final answers were manually inspected. Summary source references
+and original-message retention were inspected in local database records.
+
+Compaction trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/6e4fbae74af35eb91fe0cfd8196aa8e9
+Baseline trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/8e31026b356a0d93706b91b898b552e5
+
+Review follow-up: a stronger cumulative-lineage assertion exposed that Pydantic may
+merge consecutive requests and discard message-level metadata. Summary provenance
+now lives on `CompactionPart.metadata`, which survives normalization; original
+capture uses durable run history. The public-turn regression verifies all original
+pairs, cumulative resolvable source coverage, and removal of archive/summary records.
+Standards review found no issues; the spec review's validation finding was resolved.

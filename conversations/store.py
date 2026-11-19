@@ -4,7 +4,8 @@ from asgiref.sync import sync_to_async
 from django.db import transaction
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
-from conversations.models import ConversationRecord, ConversationTrace
+from conversations.models import ConversationRecord, ConversationTrace, ConversationSummary
+from conversations.context import ConversationContext
 
 
 class ConversationStore:
@@ -14,10 +15,19 @@ class ConversationStore:
         return ModelMessagesTypeAdapter.validate_python(record.history)
 
     @sync_to_async
-    def save(self, identity: str, messages: list[ModelMessage]) -> None:
-        ConversationRecord.objects.update_or_create(
-            identity=identity, defaults={'history': ModelMessagesTypeAdapter.dump_python(messages, mode='json')},
-        )
+    def save(self, identity: str, messages: list[ModelMessage], context: ConversationContext) -> None:
+        with transaction.atomic():
+            record = ConversationRecord.objects.select_for_update().get(identity=identity)
+            archive = dict(record.archive)
+            # Existing pre-compaction records are captured on their first continued run.
+            archive.update({key: ModelMessagesTypeAdapter.dump_python([message], mode='json')[0]
+                            for key, message in context.originals.items()})
+            record.archive = archive
+            record.history = ModelMessagesTypeAdapter.dump_python(messages, mode='json')
+            record.save(update_fields=['archive', 'history'])
+            for summary in context.summaries:
+                ConversationSummary.objects.create(conversation=record,
+                    snapshot=ModelMessagesTypeAdapter.dump_python([summary], mode='json')[0])
 
     @sync_to_async
     def track(self, identity: str, trace_id: str) -> None:

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import hashlib
 import json
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from langfuse import Evaluation, Langfuse
 from langfuse.api import DatasetItem
 from langfuse.experiment import ExperimentItem
 
-from conversations.prompts import CONVERSATION_INSTRUCTIONS
+from conversations.prompts import CONVERSATION_INSTRUCTIONS, SUMMARY_PROMPT
 from conversations.service import ConversationService
 from core.tracing import tracing
 from research.service import ResearchService
@@ -35,6 +36,18 @@ CASES = [
 ]
 
 
+
+# Filler deliberately forces compaction while remaining below the full-history hard limit.
+COMPACTION_CASES = [
+    {'name': 'compacted-correction', 'turns': [
+        'Fictional test: project Orion has a budget of 500 rupees. Acknowledge only, no research. ' + 'Background context. ' * 350,
+        'Correction: Orion budget is 700 rupees. Keep uncertainty: vendor is not selected. Acknowledge only. ' + 'Background context. ' * 350,
+        'Source reference https://example.com/orion, retrieved 2026-11-18, is fictional evidence, not a verified policy. Acknowledge only. ' + 'Background context. ' * 350,
+        'From our conversation, state project name, current budget, vendor status, and the reference URL. Do not research.',
+    ], 'contains': ['orion', '700', 'example.com/orion'],
+     'review': 'Preserve corrected budget, unresolved vendor, and exact source URL; do not claim fictional evidence is verified.'},
+]
+
 @dataclass
 class ConversationEvaluationReport:
     url: str
@@ -43,16 +56,21 @@ class ConversationEvaluationReport:
 
 
 class ConversationExperiment:
+    def __init__(self, *, compaction_cases: bool = False, full_history: bool = False) -> None:
+        self.cases = COMPACTION_CASES if compaction_cases else CASES
+        self.full_history = full_history
+
     async def task(self, *, item: ExperimentItem, **kwargs: Any) -> dict[str, Any]:
         if not isinstance(item, DatasetItem):
             raise ValueError('Expected a hosted dataset item.')
         identity = f'evaluation-{uuid4().hex}'
         answers = []
+        started = monotonic()
         for message in item.input:
             # Reconstruct the application service every turn: continuity must come from storage.
-            service = ConversationService(identity, ResearchService(SubscriptionService(settings.SUBSCRIPTION_STATE_DIR)))
+            service = ConversationService(identity, ResearchService(SubscriptionService(settings.SUBSCRIPTION_STATE_DIR)), compact=not self.full_history)
             answers.append(await service.run(message))
-        return {'answers': answers, 'conversation': identity}
+        return {'answers': answers, 'conversation': identity, 'elapsed_seconds': monotonic() - started}
 
     def evaluate(self, *, output: dict[str, Any], expected_output: Any = None, **kwargs: Any) -> list[Evaluation]:
         expected = expected_output or {}
@@ -64,20 +82,20 @@ class ConversationExperiment:
     def run(self) -> ConversationEvaluationReport:
         client = Langfuse(public_key=settings.LANGFUSE_PUBLIC_KEY, secret_key=settings.LANGFUSE_SECRET_KEY,
                           base_url=settings.LANGFUSE_BASE_URL)
-        digest = hashlib.sha256(json.dumps(CASES, sort_keys=True).encode()).hexdigest()[:12]
+        digest = hashlib.sha256(json.dumps(self.cases, sort_keys=True).encode()).hexdigest()[:12]
         dataset_name = f'conversation-fixtures-{digest}'
         try:
             client.create_dataset(name=dataset_name, description='Synthetic follow-up, correction, and ambiguity cases. Human semantic review required.')
-            for case in CASES:
+            for case in self.cases:
                 client.create_dataset_item(dataset_name=dataset_name, id=f'{dataset_name}-{case["name"]}',
                                            input=case['turns'], expected_output={'contains': case['contains'], 'review': case['review']})
             result = client.get_dataset(dataset_name).run_experiment(
-                name='persistent-conversation', task=self.task, evaluators=[self.evaluate], max_concurrency=1,
-                metadata={'prompt_sha256': hashlib.sha256((DIRECT_RESEARCH_INSTRUCTIONS + CONVERSATION_INSTRUCTIONS).encode()).hexdigest(),
-                          'mode': 'real-model', 'semantic_review_required': True},
+                name='full-history-baseline' if self.full_history else 'automatic-compaction', task=self.task, evaluators=[self.evaluate], max_concurrency=1,
+                metadata={'prompt_sha256': hashlib.sha256((DIRECT_RESEARCH_INSTRUCTIONS + CONVERSATION_INSTRUCTIONS + SUMMARY_PROMPT).encode()).hexdigest(),
+                          'mode': 'real-model', 'compaction_enabled': not self.full_history, 'semantic_review_required': True},
             )
             outputs = [item.output for item in result.item_results if isinstance(item.output, dict)]
-            passed = len(outputs) == len(CASES) and all(
+            passed = len(outputs) == len(self.cases) and all(
                 len(item.evaluations) == 1 and item.evaluations[0].value == 1
                 for item in result.item_results
             )

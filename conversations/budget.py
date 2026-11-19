@@ -16,9 +16,13 @@ class ContextBudgetExceeded(Exception):
 
 
 class ConversationBudget(AbstractCapability[None]):
-    async def before_model_request(self, ctx: RunContext[None], request_context: ModelRequestContext) -> ModelRequestContext:
+    @staticmethod
+    def size(request_context: ModelRequestContext) -> int:
         messages = ModelMessagesTypeAdapter.dump_json(request_context.messages)
         parameters = json.dumps(asdict(request_context.model_request_parameters), default=str).encode()
-        if len(messages) + len(parameters) + constants.REQUEST_HEADROOM > constants.MAX_REQUEST_BYTES:
+        return len(messages) + len(parameters) + constants.REQUEST_HEADROOM
+
+    async def before_model_request(self, ctx: RunContext[None], request_context: ModelRequestContext) -> ModelRequestContext:
+        if self.size(request_context) > constants.MAX_REQUEST_BYTES:
             raise ContextBudgetExceeded
         return request_context
