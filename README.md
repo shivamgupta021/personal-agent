@@ -287,3 +287,29 @@ uv run python manage.py evaluate_conversation --compaction --full-history
 These use the same hosted synthetic dataset and distinct experiment variants. The
 full-history baseline still enforces the hard request budget. A baseline that exceeds
 that budget is a failed comparison, not evidence of speed or token savings.
+
+### Recall older conversation details
+
+In Telegram, ask about an earlier detail. When current context is insufficient,
+`recall_conversation` searches the saved original user/assistant text for all supplied
+keywords. It returns up to five excerpts of 500 characters, newest first, with message
+IDs, roles, timestamps and truncation indicators. At most three retrieval calls are
+allowed per turn; the normal assembled-context guard still applies.
+
+Recall is local and scoped to the current conversation. It does not add a vector
+service or a retrieval cache. The archive is loaded on demand by the application,
+not sent wholesale to the model; searching very large archives remains a future
+scalability concern. Keyword matching can miss synonyms, and model interpretation
+of corrections/ambiguity still requires evaluation. Whole-conversation deletion
+removes the source archive and associated traces using the existing cleanup flow.
+
+Run real-model recall/correction, ambiguity and missing-evidence experiments:
+
+```bash
+uv run python manage.py evaluate_conversation --recall
+```
+
+Open the printed Langfuse experiment URL, then an item's trace. Inspect
+`recall_conversation` input/output and the subsequent model answer; verify cited
+message IDs and that newer corrections take precedence. Scores are coarse text
+checks, not semantic proof.

@@ -1,5 +1,7 @@
 """Atomic persistence; failed model runs never overwrite completed context."""
 
+from typing import Any
+
 from asgiref.sync import sync_to_async
 from django.db import transaction
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
@@ -13,6 +15,11 @@ class ConversationStore:
     def history(self, identity: str) -> list[ModelMessage]:
         record, _ = ConversationRecord.objects.get_or_create(identity=identity)
         return ModelMessagesTypeAdapter.validate_python(record.history)
+
+    @sync_to_async
+    def archive(self, identity: str) -> dict[str, Any]:
+        record = ConversationRecord.objects.filter(identity=identity).only('archive').first()
+        return dict(record.archive) if record else {}
 
     @sync_to_async
     def save(self, identity: str, messages: list[ModelMessage], context: ConversationContext) -> None:

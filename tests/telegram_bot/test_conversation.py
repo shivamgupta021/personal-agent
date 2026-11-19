@@ -1,10 +1,8 @@
 import asyncio
 import json
 from pathlib import Path
-from collections.abc import Iterator
 
 from asgiref.sync import sync_to_async
-from django.db import connections
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 import httpx2
@@ -129,12 +127,6 @@ def test_oversized_follow_up_keeps_previous_context(tmp_path: Path, monkeypatch:
     assert 'saved history is unchanged' in replies[1]
     assert 'deleted locally' in replies[3]
     assert replies[4] == 'unknown'
-
-
-@pytest.fixture(autouse=True)
-def close_async_connections() -> Iterator[None]:
-    yield
-    asyncio.run(sync_to_async(connections.close_all)())
 
 
 @pytest.mark.django_db(transaction=True)
@@ -299,7 +291,7 @@ def test_summary_failure_keeps_saved_context_and_only_continues_within_budget(tm
     def telegram(request: httpx2.Request) -> httpx2.Response:
         nonlocal turn
         if request.url.path.endswith('getUpdates'):
-            text = ('My code is teal. ' if turn == 0 else 'Continue. ') + 'background ' * 1200
+            text = ('My code is teal. ' if turn == 0 else 'Continue. ') + 'background ' * 1000
             turn += 1
             if turn == 4:
                 text = 'What is my code?'

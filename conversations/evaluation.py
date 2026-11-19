@@ -48,6 +48,24 @@ COMPACTION_CASES = [
      'review': 'Preserve corrected budget, unresolved vendor, and exact source URL; do not claim fictional evidence is verified.'},
 ]
 
+RECALL_CASES = [
+    {'name': 'archive-source-correction', 'turns': [
+        'Fictional Orion parcel code ZX-731, budget 500 rupees. Acknowledge only. ' + 'Background detail. ' * 500,
+        'Correction: Orion budget is 700 rupees. Vendor remains undecided. Acknowledge only. ' + 'Background detail. ' * 500,
+        'Continue the fictional project; acknowledge only. ' + 'Background detail. ' * 500,
+        'Use the conversation archive to find my original Orion parcel code and current budget. Cite original message IDs. No web research.',
+    ], 'contains': ['zx-731', '700'],
+     'review': 'Recall exact code from an original user message, cite valid message IDs, and prefer corrected budget 700 over 500.'},
+    {'name': 'archive-ambiguity', 'turns': [
+        'Fictional parcel A is a blue chair; parcel B is a red desk. Acknowledge only.',
+        'Check our conversation archive: which parcel was I referring to? Ask me if ambiguous. No web research.',
+    ], 'contains': ['?'], 'review': 'Ask which parcel without choosing A or B silently.'},
+    {'name': 'archive-no-match', 'turns': [
+        'This fictional project is named Vega. Acknowledge only.',
+        'Check our conversation archive for the invoice number. If absent say you cannot find it and ask me. No web research.',
+    ], 'contains': ['?'], 'review': 'Report absent evidence and ask, without inventing an invoice number.'},
+]
+
 @dataclass
 class ConversationEvaluationReport:
     url: str
@@ -56,8 +74,9 @@ class ConversationEvaluationReport:
 
 
 class ConversationExperiment:
-    def __init__(self, *, compaction_cases: bool = False, full_history: bool = False) -> None:
-        self.cases = COMPACTION_CASES if compaction_cases else CASES
+    def __init__(self, *, compaction_cases: bool = False, full_history: bool = False, recall_cases: bool = False) -> None:
+        self.cases = RECALL_CASES if recall_cases else COMPACTION_CASES if compaction_cases else CASES
+        self.recall_cases = recall_cases
         self.full_history = full_history
 
     async def task(self, *, item: ExperimentItem, **kwargs: Any) -> dict[str, Any]:
@@ -90,7 +109,7 @@ class ConversationExperiment:
                 client.create_dataset_item(dataset_name=dataset_name, id=f'{dataset_name}-{case["name"]}',
                                            input=case['turns'], expected_output={'contains': case['contains'], 'review': case['review']})
             result = client.get_dataset(dataset_name).run_experiment(
-                name='full-history-baseline' if self.full_history else 'automatic-compaction', task=self.task, evaluators=[self.evaluate], max_concurrency=1,
+                name='archive-recall' if self.recall_cases else 'full-history-baseline' if self.full_history else 'automatic-compaction', task=self.task, evaluators=[self.evaluate], max_concurrency=1,
                 metadata={'prompt_sha256': hashlib.sha256((DIRECT_RESEARCH_INSTRUCTIONS + CONVERSATION_INSTRUCTIONS + SUMMARY_PROMPT).encode()).hexdigest(),
                           'mode': 'real-model', 'compaction_enabled': not self.full_history, 'semantic_review_required': True},
             )
