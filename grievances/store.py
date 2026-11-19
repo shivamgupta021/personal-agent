@@ -8,7 +8,7 @@ from django.db import transaction
 
 from core.turns import OwnerTurn
 from grievances.constants import DRAFT_MATERIAL_FIELDS, MATERIAL_FIELDS
-from grievances.models import CaseFactRevision, CaseMessage, CaseOperationReceipt, CaseSelection, ComplaintDraft, GrievanceCase
+from grievances.models import CaseFactRevision, CaseMessage, CaseOperationReceipt, CaseSelection, CaseResearch, CaseResearchBrief, ComplaintDraft, GrievanceCase
 from grievances.schema import IntakeAction
 
 
@@ -40,6 +40,10 @@ class DraftContent:
     subject: str
     body: str
     missing_fields: tuple[str, ...]
+    evidence_revision: int | None = None
+    observed_evidence_revision: int | None = None
+    brief_revision: int | None = None
+    brief_confirmed: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,7 @@ class DraftView:
     missing_fields: tuple[str, ...]
     outdated: bool
     current: bool
+    evidence_revision: int | None = None
 
     def describe(self) -> str:
         state = 'outdated' if self.outdated else ('current usable draft' if self.current else 'saved version')
@@ -182,7 +187,7 @@ class CaseStore:
                     reply = ('Facts saved. ' if outcome == 'saved' else '') + self.describe(case)
             else:
                 case = None
-                reply = 'Please create or explicitly select a case, or clarify the case and requested action. Please specify whether to inspect facts or draft a refund email. Research and case outcomes are not available yet.'
+                reply = 'Please create or explicitly select a case, or clarify the case and requested action. Please specify whether to inspect facts or draft a refund email. For official research, review and confirm the public fields and official site first. Sending and case outcomes are not available yet.'
             if case is not None and action.action in ('create', 'update', 'show') and outcome != 'existing':
                 CaseMessage.objects.create(case=case, role='user', text=turn.text)
                 CaseMessage.objects.create(case=case, role='assistant', text=reply)
@@ -212,16 +217,20 @@ class CaseStore:
         if case is None:
             return []
         rows = list(ComplaintDraft.objects.filter(case_id=case.id).order_by('version'))
+        latest_evidence = CaseResearch.objects.filter(case_id=case.id).order_by('-revision').first()
+        latest_brief = CaseResearchBrief.objects.filter(case_id=case.id).order_by('-revision').first()
         outdated: dict[int, bool] = {}
         for row in rows:
             source = case.history[row.fact_revision - 1]
-            outdated[row.pk] = any(
+            outdated[row.pk] = (row.evidence_revision is not None and (latest_evidence is None
+                or row.evidence_revision != latest_evidence.revision or latest_brief is None
+                or not latest_brief.confirmed or latest_evidence.brief_revision != latest_brief.revision)) or any(
                 any(later.get(key) != source.get(key) for key in DRAFT_MATERIAL_FIELDS)
                 for later in case.history[row.fact_revision:])
         usable = [row.version for row in rows if not outdated[row.pk] and not row.missing_fields]
         current_version = max(usable, default=0)
         return [DraftView(str(row.pk), row.version, row.fact_revision, row.subject, row.body,
-                          tuple(row.missing_fields), outdated[row.pk], row.version == current_version) for row in rows]
+                          tuple(row.missing_fields), outdated[row.pk], row.version == current_version, row.evidence_revision) for row in rows]
 
     @sync_to_async
     def list_drafts(self, owner_id: str, case_id: str) -> list[DraftView]:
@@ -262,11 +271,18 @@ class CaseStore:
                 return 'Case selection changed while drafting. No draft was saved; please request it again.'
             if case is None or case.revision != current.revision:
                 return 'Case facts changed or the case was deleted while drafting. No draft was saved; please request it again.'
+            evidence = CaseResearch.objects.filter(case=case).order_by('-revision').first()
+            brief = CaseResearchBrief.objects.filter(case=case).order_by('-revision').first()
+            if ((brief.revision if brief else None) != content.brief_revision
+                    or (brief.confirmed if brief else None) != content.brief_confirmed):
+                return 'Public research fields changed while drafting. No draft was saved; please request it again.'
+            if (evidence.revision if evidence else None) != content.observed_evidence_revision:
+                return 'Research evidence changed while drafting. No draft was saved; please request it again.'
             latest = ComplaintDraft.objects.filter(case=case).order_by('-version').first()
             version = latest.version + 1 if latest else 1
             receipt = CaseOperationReceipt.objects.create(owner_id=turn.owner_id, conversation_id=turn.conversation_id,
                 delivery_id=turn.delivery_id, action='draft', case_id=case.pk, revision=current.revision, outcome='saved')
             row = ComplaintDraft.objects.create(case=case, version=version, fact_revision=current.revision, operation=receipt,
-                subject=content.subject, body=content.body, missing_fields=list(content.missing_fields))
+                subject=content.subject, body=content.body, missing_fields=list(content.missing_fields), evidence_revision=content.evidence_revision)
             return DraftView(str(row.pk), version, current.revision, content.subject, content.body, content.missing_fields,
-                             False, not content.missing_fields).describe()
+                             False, not content.missing_fields, content.evidence_revision).describe()

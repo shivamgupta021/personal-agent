@@ -71,6 +71,7 @@ class ComplaintDraft(models.Model):
     version: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
     fact_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
     operation: models.OneToOneField[CaseOperationReceipt, CaseOperationReceipt] = models.OneToOneField(CaseOperationReceipt, on_delete=models.CASCADE)
+    evidence_revision: models.PositiveIntegerField[int | None, int | None] = models.PositiveIntegerField(null=True)
     subject: models.TextField[str, str] = models.TextField()
     body: models.TextField[str, str] = models.TextField()
     missing_fields = models.JSONField(default=list)
@@ -78,3 +79,31 @@ class ComplaintDraft(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['case', 'version'], name='unique_case_draft_version')]
+
+
+class CaseResearchBrief(models.Model):
+    case: models.ForeignKey[GrievanceCase, GrievanceCase] = models.ForeignKey(GrievanceCase, on_delete=models.CASCADE)
+    revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    fact_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    fields = models.JSONField()
+    confirmed: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+    confirmed_at: models.DateTimeField[datetime | None, datetime | None] = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['case', 'revision'], name='unique_case_brief_revision')]
+
+
+class CaseResearch(models.Model):
+    case: models.ForeignKey[GrievanceCase, GrievanceCase] = models.ForeignKey(GrievanceCase, on_delete=models.CASCADE)
+    revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    fact_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    brief_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    status: models.CharField[str, str] = models.CharField(max_length=32)
+    sources = models.JSONField(default=list)
+    findings = models.JSONField(default=list)
+    uncertainty: models.TextField[str, str] = models.TextField()
+    created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['case', 'revision'], name='unique_case_research_revision')]

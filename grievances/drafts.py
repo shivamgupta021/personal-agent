@@ -9,6 +9,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from core.tracing import tracing
 from core.turns import OwnerTurn
 from grievances import constants
+from grievances.policy_store import PolicyStore, ResearchBriefView, ResearchView
 from grievances.prompts import DRAFT_INSTRUCTIONS
 from grievances.schema import DraftPlan
 from grievances.store import CaseStore, CaseView, DraftContent, SelectionView
@@ -52,6 +53,28 @@ class DraftRenderer:
         return DraftContent(subject, '\n\n'.join(paragraphs), missing)
 
 
+    def with_research(self, content: DraftContent, evidence: ResearchView | None,
+                      brief: ResearchBriefView | None, fact_revision: int) -> DraftContent:
+        appendix = ''
+        cited_revision: int | None = None
+        if evidence:
+            if brief is None or not brief.confirmed or brief.revision != evidence.brief_revision:
+                appendix = ('\n\nPrior research is inactive because the public fields or official site changed. '
+                            'Review, confirm and research the current brief before relying on policy evidence.')
+            elif evidence.fact_revision != fact_revision:
+                appendix = ('\n\nPrior research predates the current case facts. Research again before relying on policy evidence.')
+            else:
+                cited_revision = evidence.revision
+                appendix = '\n\nResearch notes for review (source quotations; applicability is uncertain):\n' + evidence.uncertainty
+                if evidence.status == 'verified_sources':
+                    for finding in evidence.findings:
+                        appendix += (f"\n\n{finding.kind} — {finding.url} (retrieved {finding.retrieved_at}; {finding.applicability}):\n"
+                                     + finding.quote)
+        return DraftContent(content.subject, content.body + appendix, content.missing_fields, cited_revision,
+                            evidence.revision if evidence else None, brief.revision if brief else None,
+                            brief.confirmed if brief else None)
+
+
 class DraftService:
     def __init__(self, model: Model, store: CaseStore) -> None:
         self.store = store
@@ -61,6 +84,9 @@ class DraftService:
         self.agent.instrument = tracing.private_instrumentation()
 
     async def run(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, usage: RunUsage) -> str:
+        evidence = await PolicyStore().list_research(turn.owner_id, current.id)
+        latest = evidence[-1] if evidence else None
+        brief = await PolicyStore().latest_brief(turn.owner_id, current.id)
         payload = json.dumps({'facts': current.facts,
                               'available_fact_keys': [key for key in constants.DRAFT_FACT_FIELDS if key in current.facts]})
         if len(payload) > constants.MAX_CONTEXT_CHARS:
@@ -75,4 +101,5 @@ class DraftService:
                 content = DraftRenderer().render(current.facts, plan)
         except InvalidDraftPlan:
             return 'Drafting could not finish safely. No draft was saved; your case facts and earlier drafts are unchanged.'
+        content = DraftRenderer().with_research(content, latest, brief, current.revision)
         return await self.store.save_draft(turn, selection, current, content)
