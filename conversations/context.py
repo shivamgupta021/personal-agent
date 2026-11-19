@@ -11,6 +11,8 @@ from pydantic_ai.messages import CompactionPart, ModelMessage
 class ConversationContext:
     messages: list[ModelMessage]
     compact: bool = True
+    record_id: int | None = None
+    revision: int = 0
     originals: dict[str, ModelMessage] = field(default_factory=dict)
     summaries: list[ModelMessage] = field(default_factory=list)
 

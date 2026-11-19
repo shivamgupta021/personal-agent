@@ -9,6 +9,7 @@ class ConversationRecord(models.Model):
     identity: models.CharField[str, str] = models.CharField(max_length=128, unique=True)
     history = models.JSONField(default=list)
     archive = models.JSONField(default=dict)
+    revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
 
 
 class ConversationTrace(models.Model):

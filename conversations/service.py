@@ -10,13 +10,14 @@ from conversations.context import ConversationContext
 from conversations.recall import ArchiveRecall
 from conversations.cleanup import TraceCleanup
 from conversations.constants import DELETE_CONVERSATION_PHRASES
-from conversations.store import ConversationStore
+from conversations.store import ConversationStore, ContextChanged
+from conversations.facts import FactCleanup, ConversationEdited
 from core.tracing import tracing
 
 
 class ConversationRunner(Protocol):
     async def run_turn(self, message: str, context: ConversationContext,
-                       forget: Callable[[], Awaitable[str]], recall: ArchiveRecall) -> AgentRunResult[str]: ...
+                       forget: Callable[[], Awaitable[str]], recall: ArchiveRecall, facts: FactCleanup) -> AgentRunResult[str]: ...
 
 
 class ConversationDeleted(Exception):
@@ -39,18 +40,25 @@ class ConversationService:
             return 'Conversation deleted locally. ' + await self.cleanup(self.identity)
         if control == 'retry trace cleanup':
             return await self.cleanup(self.identity)
-        context = ConversationContext(await self.store.history(self.identity), compact=self.compact)
+        context = await self.store.context(self.identity)
+        context.compact = self.compact
         try:
             with tracing.operation('conversation.turn', {'message': message}, kind='agent') as span:
                 span.set_attribute('langfuse.session.id', self.identity)
                 trace_id = format(span.get_span_context().trace_id, '032x')
                 if span.is_recording():
-                    await self.store.track(self.identity, trace_id)
-                result = await self.runner.run_turn(message, context, self.forget_conversation, ArchiveRecall(self.identity, self.store))
+                    await self.store.track(self.identity, trace_id, context)
+                result = await self.runner.run_turn(message, context, self.forget_conversation, ArchiveRecall(self.identity, self.store),
+                    FactCleanup(self.identity, self.store, message, context))
                 context.capture(result.all_messages())
                 await self.store.save(self.identity, result.all_messages(), context)
                 tracing.record_output(span, {'answer': result.output})
                 return result.output
+        except ConversationEdited as edited:
+            confirmation = 'Fact updated locally. ' if edited.action == 'correct' else 'Selected information forgotten locally. '
+            return confirmation + await self.cleanup(self.identity)
+        except ContextChanged:
+            return 'Conversation state changed while this request was running. Please send your message again. ' + await self.cleanup(self.identity)
         except ContextBudgetExceeded:
             return 'This conversation exceeds the current context budget. Your saved history is unchanged. Compaction could not safely fit this request. Try a smaller message.'
         except ConversationDeleted:
