@@ -11,7 +11,7 @@ from conversations.recall import ArchiveRecall
 from conversations.cleanup import TraceCleanup
 from conversations.constants import DELETE_CONVERSATION_PHRASES
 from conversations.store import ConversationStore, ContextChanged
-from conversations.facts import FactCleanup, ConversationEdited
+from conversations.facts import FactCleanup, ConversationEdited, ConversationEditRejected
 from core.tracing import tracing
 
 
@@ -56,6 +56,8 @@ class ConversationService:
                 await self.store.save(self.identity, result.all_messages(), context)
                 tracing.record_output(span, {'answer': result.output})
                 return result.output
+        except ConversationEditRejected as rejected:
+            return 'Nothing changed: ' + str(rejected)
         except ConversationEdited as edited:
             cleaned = True
             confirmation = 'Fact updated locally. ' if edited.action == 'correct' else 'Selected information forgotten locally. '

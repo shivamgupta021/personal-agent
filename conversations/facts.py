@@ -41,6 +41,7 @@ class Redactions(BaseModel):
 
 class EditVerification(BaseModel):
     safe: bool
+    reason: str = Field(default="", max_length=constants.FACT_EDIT_SCOPE_CHARS)
 
 
 @dataclass
@@ -89,6 +90,10 @@ class EditableText:
             self.container[self.key] = text
         else:
             raise ValueError('Invalid text edit')
+
+
+class ConversationEditRejected(Exception):
+    """An authorized edit failed before commit; do not retain its request as a fact."""
 
 
 class ConversationEdited(Exception):
@@ -214,12 +219,19 @@ class FactEditor:
         Preserves unrelated prose, removes derived copies, and ends the turn after a
         successful atomic edit. Ambiguous targets require clarification.
         """
+        intent: EditIntent | None = None
         try:
             async with asyncio.timeout(constants.FACT_EDIT_TIMEOUT_SECONDS):
-                plan = await self.edit(ctx, target)
+                evidence = ModelMessagesTypeAdapter.dump_json(self.cleanup.context.messages).decode()
+                intent = (await self.authorizer.run(json.dumps({'latest_user_request': self.cleanup.request,
+                    'proposed_target': target, 'recent_context': evidence}), usage=ctx.usage,
+                    usage_limits=UsageLimits(request_limit=MAX_MODEL_REQUESTS))).output
+                plan = await self.edit(ctx, intent)
         except Exception:
-            return EditResult('unchanged', 'I could not safely edit that information. Nothing was changed; please clarify the fact or try again.')
+            plan = EditResult('unchanged', 'I could not safely edit that information. Nothing was changed; please clarify the fact or try again.')
         if isinstance(plan, EditResult):
+            if plan.status == 'unchanged':
+                raise ConversationEditRejected(plan.message)
             return plan
         # Network/planning timeout ends before the durable transaction starts.
         await self.cleanup.apply(plan.messages, plan.intent, matched=plan.matched)
@@ -254,11 +266,8 @@ class FactEditor:
                     walk(part, 'args', source)
         return segments
 
-    async def edit(self, ctx: RunContext[None], target: str) -> EditResult | FactEditPlan:
+    async def edit(self, ctx: RunContext[None], intent: EditIntent) -> EditResult | FactEditPlan:
         limits = UsageLimits(request_limit=MAX_MODEL_REQUESTS)
-        evidence = ModelMessagesTypeAdapter.dump_json(self.cleanup.context.messages).decode()
-        intent = (await self.authorizer.run(json.dumps({'latest_user_request': self.cleanup.request,
-            'proposed_target': target, 'recent_context': evidence}), usage=ctx.usage, usage_limits=limits)).output
         if intent.action in ('none', 'clarify'):
             return EditResult('clarify', intent.question or 'Which fact should I change or forget? Please state the intended scope.')
         if intent.action == 'correct' and (not intent.replacement or intent.replacement not in self.cleanup.request):
@@ -284,13 +293,14 @@ class FactEditor:
         originals = {s['id']: s['text'] for s in segments}
         for batch in batches:
             result = await self.redactor.run(json.dumps({'scope': intent.scope, 'action': intent.action,
-                'latest_user_request': self.cleanup.request, 'segments': batch}), usage=ctx.usage, usage_limits=limits)
+                'latest_user_request': self.cleanup.request, 'authorized_replacement': intent.replacement, 'segments': batch}), usage=ctx.usage, usage_limits=limits)
             allowed = {s['id'] for s in batch}
             for edit in result.output.edits:
                 if edit.segment_id not in allowed or originals[edit.segment_id].count(edit.quote) != 1:
                     return EditResult('unchanged', 'The edit could not be verified against the originals. Nothing was changed.')
                 planned.append(edit)
             verified = await self.verifier.run(json.dumps({'scope': intent.scope, 'action': intent.action,
+                'latest_user_request': self.cleanup.request, 'authorized_replacement': intent.replacement,
                 'segments': batch, 'proposed_edits': [edit.model_dump() for edit in result.output.edits]}),
                 usage=ctx.usage, usage_limits=limits)
             if not verified.output.safe:

@@ -24,10 +24,10 @@ from telegram_bot.state import PollingState
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize('operation', ['forget', 'correct', 'quoted', 'bad_quote', 'unsafe', 'timeout', 'delivery_failure', 'repeat_forget', 'mixed_request', 'slow_commit'])
+@pytest.mark.parametrize('operation', ['forget', 'correct', 'quoted', 'bad_quote', 'unsafe', 'timeout', 'delivery_failure', 'repeat_forget', 'mixed_request', 'slow_commit', 'rejected_correction', 'authorization_timeout'])
 def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, operation: str, monkeypatch: pytest.MonkeyPatch) -> None:
     turns = ['My parcel code is SECRET-1. My favourite colour is teal.',
-             ('Correction: my parcel code is UPDATED-2.' if operation == 'correct' else 'Explain this quote: Forget my parcel code.' if operation == 'quoted' else 'Forget my parcel code.'),
+             ('Correction: my parcel code is UPDATED-2.' if operation in ('correct', 'rejected_correction') else 'Explain this quote: Forget my parcel code.' if operation == 'quoted' else 'Forget my parcel code.'),
              'What are my parcel code and favourite colour?']
     if operation == 'mixed_request':
         turns[1] = 'Forget my parcel code. My comparison language is Rust.'
@@ -57,10 +57,15 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         instructions = str(info)
         if 'FACT_EDIT_AUTHORIZATION' in instructions:
-            return structured(info, {'action': 'none' if operation == 'quoted' else 'correct' if operation == 'correct' else 'forget', 'scope': 'parcel code and its value',
-                'replacement': 'my parcel code is UPDATED-2.' if operation == 'correct' else '', 'question': ''})
+            if operation == 'authorization_timeout':
+                raise TimeoutError('controlled authorization failure')
+            return structured(info, {'action': 'none' if operation == 'quoted' else 'correct' if operation in ('correct', 'rejected_correction') else 'forget', 'scope': 'parcel code and its value',
+                'replacement': 'my parcel code is UPDATED-2.' if operation in ('correct', 'rejected_correction') else '', 'question': ''})
         if 'FACT_EDIT_VERIFICATION' in instructions:
-            return structured(info, {'safe': operation != 'unsafe'})
+            audit = json.loads(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart) and isinstance(p.content, str)))
+            assert audit['latest_user_request'] == turns[turn - 1]
+            assert audit['authorized_replacement'] == ('my parcel code is UPDATED-2.' if operation in ('correct', 'rejected_correction') else '')
+            return structured(info, {'safe': operation not in ('unsafe', 'rejected_correction')})
         if 'FACT_EDIT_REDACTION' in instructions:
             if operation == 'timeout':
                 raise TimeoutError('controlled editor failure')
@@ -112,13 +117,17 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
                         if operation == 'slow_commit' and index == 1:
                             await delayed_commit(False)
     asyncio.run(run())
-    if operation in ('quoted', 'bad_quote', 'unsafe', 'timeout'):
+    if operation in ('quoted', 'bad_quote', 'unsafe', 'timeout', 'rejected_correction', 'authorization_timeout'):
         assert 'Nothing changed' in replies[1]
         assert replies[-1] == 'SECRET-1, teal'
     else:
-        assert 'updated locally' in replies[1] if operation == 'correct' else 'forgotten locally' in replies[1]
-        assert replies[-1] == ('UPDATED-2, teal' if operation == 'correct' else 'unknown, teal, Rust' if operation == 'mixed_request' else 'unknown, teal')
+        assert 'updated locally' in replies[1] if operation in ('correct', 'rejected_correction') else 'forgotten locally' in replies[1]
+        assert replies[-1] == ('UPDATED-2, teal' if operation in ('correct', 'rejected_correction') else 'unknown, teal, Rust' if operation == 'mixed_request' else 'unknown, teal')
         assert 'SECRET-1' not in seen[-1]
+    if operation in ('bad_quote', 'unsafe', 'timeout', 'rejected_correction', 'authorization_timeout'):
+        record = ConversationRecord.objects.get(identity='targeted-owner')
+        assert turns[1] not in json.dumps(record.archive) + json.dumps(record.history)
+        assert 'UPDATED-2' not in json.dumps(record.archive) + json.dumps(record.history)
     assert 'teal' in seen[-1]
     if operation == 'repeat_forget':
         assert 'already absent' in replies[2]
@@ -298,8 +307,10 @@ def test_targeted_forgetting_retains_unrelated_tool_evidence(tmp_path: Path) -> 
             returns = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
             assert returns and all(p.tool_call_id in calls for p in returns)
             assert 'Refunds within 30 days.' in str(returns)
-            assert all(p.content['offset'] is None for p in returns)
-            assert all(p.content['truncated'] is False for p in returns)
+            payloads = [dict(p.content) for p in returns if isinstance(p.content, dict)]
+            assert len(payloads) == len(returns)
+            assert all(p['offset'] is None for p in payloads)
+            assert all(p['truncated'] is False for p in payloads)
             return ModelResponse(parts=[TextPart('Refunds within 30 days.')])
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, value)])
 
