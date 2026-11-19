@@ -2,6 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 from asgiref.sync import sync_to_async
+from django.db import connection
 from typing import Any
 
 import httpx2
@@ -23,11 +24,15 @@ from telegram_bot.state import PollingState
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize('operation', ['forget', 'correct', 'quoted', 'bad_quote', 'unsafe', 'timeout', 'delivery_failure', 'repeat_forget'])
-def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, operation: str) -> None:
+@pytest.mark.parametrize('operation', ['forget', 'correct', 'quoted', 'bad_quote', 'unsafe', 'timeout', 'delivery_failure', 'repeat_forget', 'mixed_request', 'slow_commit'])
+def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, operation: str, monkeypatch: pytest.MonkeyPatch) -> None:
     turns = ['My parcel code is SECRET-1. My favourite colour is teal.',
              ('Correction: my parcel code is UPDATED-2.' if operation == 'correct' else 'Explain this quote: Forget my parcel code.' if operation == 'quoted' else 'Forget my parcel code.'),
              'What are my parcel code and favourite colour?']
+    if operation == 'mixed_request':
+        turns[1] = 'Forget my parcel code. My comparison language is Rust.'
+    if operation == 'slow_commit':
+        monkeypatch.setattr(constants, 'FACT_EDIT_TIMEOUT_SECONDS', 1)
     if operation == 'repeat_forget':
         turns.insert(2, 'Forget my parcel code SECRET-1.')
     replies: list[str] = []
@@ -62,7 +67,7 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
             data = json.loads(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart) and isinstance(p.content, str)))
             edits = []
             for segment in data['segments']:
-                for quote in ['My parcel code is SECRET-1.', 'Your parcel identifier is SECRET-1.']:
+                for quote in ['My parcel code is SECRET-1.', 'Your parcel identifier is SECRET-1.', 'Forget my parcel code.', 'Forget my parcel code SECRET-1.', 'Correction: my parcel code is UPDATED-2.']:
                     if quote in segment['text']:
                         edits.append({'segment_id': segment['id'], 'quote': quote if operation != 'bad_quote' else 'fabricated quote'})
             return structured(info, {'edits': edits})
@@ -75,15 +80,26 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
                 return ModelResponse(parts=[TextPart('Nothing changed: ' + str(returns[-1].content))])
             return ModelResponse(parts=[ToolCallPart('edit_conversation_fact', {'target': 'parcel code'})])
         seen.append(str(messages))
-        answer = ('UPDATED-2' if 'UPDATED-2' in str(messages) else 'SECRET-1' if 'SECRET-1' in str(messages) else 'unknown') + ', teal'
+        answer = ('UPDATED-2' if 'UPDATED-2' in str(messages) else 'SECRET-1' if 'SECRET-1' in str(messages) else 'unknown') + ', teal' + (', Rust' if 'Rust' in str(messages) else '')
         return ModelResponse(parts=[TextPart(answer)])
+
+    @sync_to_async
+    def delayed_commit(enable: bool) -> None:
+        with connection.cursor() as cursor:
+            if enable:
+                cursor.execute("CREATE FUNCTION test_delay_fact_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1.5); RETURN NEW; END $$")
+                cursor.execute("CREATE TRIGGER test_delay_fact_commit BEFORE UPDATE ON conversations_conversationrecord FOR EACH ROW EXECUTE FUNCTION test_delay_fact_commit()")
+            else:
+                cursor.execute("DROP FUNCTION IF EXISTS test_delay_fact_commit() CASCADE")
 
     async def run() -> None:
         async with (
             httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http,
             httpx2.AsyncClient(transport=httpx2.MockTransport(lambda r: httpx2.Response(500))) as web,
         ):
-            for _ in turns:
+            for index in range(len(turns)):
+                if operation == 'slow_commit' and index == 1:
+                    await delayed_commit(True)
                 conversation = ConversationService('targeted-owner', ResearchAgent(FunctionModel(model), Firecrawl(web)))
                 service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
                 with service.state.locked():
@@ -92,13 +108,16 @@ def test_targeted_edit_preserves_unrelated_facts_after_restart(tmp_path: Path, o
                     except TelegramError:
                         if operation != 'delivery_failure':
                             raise
+                    finally:
+                        if operation == 'slow_commit' and index == 1:
+                            await delayed_commit(False)
     asyncio.run(run())
     if operation in ('quoted', 'bad_quote', 'unsafe', 'timeout'):
         assert 'Nothing changed' in replies[1]
         assert replies[-1] == 'SECRET-1, teal'
     else:
         assert 'updated locally' in replies[1] if operation == 'correct' else 'forgotten locally' in replies[1]
-        assert replies[-1] == ('UPDATED-2, teal' if operation == 'correct' else 'unknown, teal')
+        assert replies[-1] == ('UPDATED-2, teal' if operation == 'correct' else 'unknown, teal, Rust' if operation == 'mixed_request' else 'unknown, teal')
         assert 'SECRET-1' not in seen[-1]
     assert 'teal' in seen[-1]
     if operation == 'repeat_forget':
@@ -147,7 +166,7 @@ def test_targeted_forgetting_purges_compaction_and_recall_and_retries_trace_clea
             data = json.loads(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart) and isinstance(p.content, str)))
             edits = []
             for segment in data['segments']:
-                for quote in ['My parcel code is SECRET-1.', 'Your parcel identifier is SECRET-1.']:
+                for quote in ['My parcel code is SECRET-1.', 'Your parcel identifier is SECRET-1.', 'Forget my parcel code.', 'Forget my parcel code SECRET-1.', 'Correction: my parcel code is UPDATED-2.']:
                     if quote in segment['text']:
                         edits.append({'segment_id': segment['id'], 'quote': quote})
             return structured(info, {'edits': edits})
@@ -213,8 +232,8 @@ def test_in_flight_turn_cannot_restore_forgotten_context() -> None:
                 value: dict[str, Any] = {'action': 'forget', 'scope': 'parcel code', 'replacement': '', 'question': ''}
             elif 'FACT_EDIT_REDACTION' in str(info):
                 data = json.loads(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart) and isinstance(p.content, str)))
-                value = {'edits': [{'segment_id': s['id'], 'quote': 'My parcel code is SECRET-1.'}
-                                   for s in data['segments'] if 'My parcel code is SECRET-1.' in s['text']]}
+                value = {'edits': [{'segment_id': s['id'], 'quote': quote}
+                                   for s in data['segments'] for quote in ['My parcel code is SECRET-1.', 'Forget my parcel code.'] if quote in s['text']]}
             elif 'FACT_EDIT_VERIFICATION' in str(info):
                 value = {'safe': True}
             else:
@@ -238,3 +257,66 @@ def test_in_flight_turn_cannot_restore_forgotten_context() -> None:
             assert 'state changed' in await stale
             assert await ConversationService('concurrent-owner', ResearchAgent(FunctionModel(inspect), Firecrawl(web))).run('What do you remember?') == 'Unknown parcel; teal.'
     asyncio.run(run())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_targeted_forgetting_retains_unrelated_tool_evidence(tmp_path: Path) -> None:
+    turns = ['Read https://example.com/SECRET-1/policy.', 'Forget the parcel code and page offset.', 'What does the policy say?']
+    replies: list[str] = []
+    turn = 0
+
+    def telegram(request: httpx2.Request) -> httpx2.Response:
+        nonlocal turn
+        if request.url.path.endswith('getUpdates'):
+            value = turns[turn]
+            turn += 1
+            return httpx2.Response(200, json={'ok': True, 'result': [{'update_id': turn,
+                'message': {'from': {'id': 7}, 'chat': {'id': 7, 'type': 'private'}, 'text': value}}]})
+        replies.append(json.loads(request.content)['text'])
+        return httpx2.Response(200, json={'ok': True, 'result': {}})
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if 'FACT_EDIT_AUTHORIZATION' in str(info):
+            value: dict[str, Any] = {'action': 'forget', 'scope': 'parcel code SECRET-1 and page offset 1717 and their copies', 'replacement': '', 'question': ''}
+        elif 'FACT_EDIT_REDACTION' in str(info):
+            data = json.loads(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart) and isinstance(p.content, str)))
+            value = {'edits': [{'segment_id': s['id'], 'quote': quote}
+                               for s in data['segments'] for quote in ['SECRET-1', '1717', 'Forget the parcel code and page offset.'] if quote in s['text']]}
+        elif 'FACT_EDIT_VERIFICATION' in str(info):
+            value = {'safe': True}
+        else:
+            if turn == 1:
+                if any(isinstance(p, ToolReturnPart) for p in messages[-1].parts):
+                    return ModelResponse(parts=[TextPart('I have read the policy.')])
+                return ModelResponse(parts=[ToolCallPart('read_page', {'url': 'https://example.com/SECRET-1/policy', 'offset': 1717},
+                                                        provider_details={'private_duplicate': 'SECRET-1'})],
+                                     provider_details={'private_duplicate': 'SECRET-1'})
+            if turn == 2:
+                return ModelResponse(parts=[ToolCallPart('edit_conversation_fact', {'target': 'parcel code'})])
+            assert 'SECRET-1' not in str(messages)
+            calls = {p.tool_call_id for m in messages for p in m.parts if isinstance(p, ToolCallPart)}
+            returns = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
+            assert returns and all(p.tool_call_id in calls for p in returns)
+            assert 'Refunds within 30 days.' in str(returns)
+            assert all(p.content['offset'] is None for p in returns)
+            assert all(p.content['truncated'] is False for p in returns)
+            return ModelResponse(parts=[TextPart('Refunds within 30 days.')])
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, value)])
+
+    async def run() -> None:
+        async with (
+            httpx2.AsyncClient(base_url='https://telegram.invalid/', transport=httpx2.MockTransport(telegram)) as http,
+            httpx2.AsyncClient(base_url='https://firecrawl.invalid/', transport=httpx2.MockTransport(
+                lambda request: httpx2.Response(200, json={'success': True, 'data': {'markdown': ('x' * 1717) + 'Parcel code SECRET-1. Refunds within 30 days.'}}))) as web,
+        ):
+            for _ in turns:
+                conversation = ConversationService('tool-evidence-owner', ResearchAgent(FunctionModel(model), Firecrawl(web)))
+                service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7, conversation.run)
+                with service.state.locked():
+                    await service.poll_once()
+    asyncio.run(run())
+    assert 'forgotten locally' in replies[1]
+    assert replies[2] == 'Refunds within 30 days.'
+    record = ConversationRecord.objects.get(identity='tool-evidence-owner')
+    assert 'SECRET-1' not in json.dumps(record.archive) + json.dumps(record.history)
+    assert 'Refunds within 30 days.' in json.dumps(record.archive)

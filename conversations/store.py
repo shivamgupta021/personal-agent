@@ -37,7 +37,8 @@ class ConversationStore:
                             for key, message in context.originals.items()})
             record.archive = archive
             record.history = ModelMessagesTypeAdapter.dump_python(messages, mode='json')
-            record.save(update_fields=['archive', 'history'])
+            record.revision += 1
+            record.save(update_fields=['archive', 'history', 'revision'])
             for summary in context.summaries:
                 ConversationSummary.objects.create(conversation=record,
                     snapshot=ModelMessagesTypeAdapter.dump_python([summary], mode='json')[0])
@@ -75,6 +76,10 @@ class ConversationStore:
         with transaction.atomic():
             ConversationRecord.objects.filter(identity=identity).delete()
             ConversationTrace.objects.filter(identity=identity).update(pending_deletion=True)
+
+    @sync_to_async
+    def trace_pending(self, identity: str, trace_id: str) -> bool:
+        return ConversationTrace.objects.filter(identity=identity, trace_id=trace_id, pending_deletion=True).exists()
 
     @sync_to_async
     def pending(self, identity: str) -> list[str]:

@@ -42,6 +42,8 @@ class ConversationService:
             return await self.cleanup(self.identity)
         context = await self.store.context(self.identity)
         context.compact = self.compact
+        trace_id: str | None = None
+        cleaned = False
         try:
             with tracing.operation('conversation.turn', {'message': message}, kind='agent') as span:
                 span.set_attribute('langfuse.session.id', self.identity)
@@ -55,16 +57,24 @@ class ConversationService:
                 tracing.record_output(span, {'answer': result.output})
                 return result.output
         except ConversationEdited as edited:
+            cleaned = True
             confirmation = 'Fact updated locally. ' if edited.action == 'correct' else 'Selected information forgotten locally. '
             if edited.action == 'forget' and not edited.matched:
                 confirmation = 'Selected information was already absent; your forgetting request was not retained locally. '
             return confirmation + await self.cleanup(self.identity)
         except ContextChanged:
+            cleaned = True
             return 'Conversation state changed while this request was running. Please send your message again. ' + await self.cleanup(self.identity)
         except ContextBudgetExceeded:
             return 'This conversation exceeds the current context budget. Your saved history is unchanged. Compaction could not safely fit this request. Try a smaller message.'
         except ConversationDeleted:
+            cleaned = True
             return 'Conversation deleted locally. ' + await self.cleanup(self.identity)
+        finally:
+            # A stale failing/cancelled run can end and export spans after another
+            # turn deleted them. Flush and repeat deletion after these spans close.
+            if not cleaned and trace_id and await self.store.trace_pending(self.identity, trace_id):
+                await self.cleanup(self.identity)
 
     async def forget_conversation(self) -> str:
         """Delete all stored conversation history, only on the owner's explicit request."""
