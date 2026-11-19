@@ -76,3 +76,10 @@ Automatic inference of lasting preferences; automatic topic splitting; grievance
 ## Further Notes
 
 This extends the [umbrella MVP spec](https://github.com/shivamgupta021/personal-agent/issues/1) and informs decision issues #13–#15 without closing broader grievance decisions. Existing provisional grievance tickets remain provisional. The repository research note records primary-source evidence and unverified integration points. The approved feature is delivered through separately reviewed vertical slices, each followed by a learning checkpoint.
+
+
+## Autonomous completion authorization — 19 November 2026
+
+For this implementation run, the owner explicitly requested completion of all remaining tickets without waiting for per-milestone human review. Preserve the existing feature scopes, public test boundaries and acceptance gates. Each milestone still starts from merged main, receives independent standards/spec review, records deterministic and live evidence, and merges before its dependants begin. The owner receives a consolidated walkthrough afterward.
+
+The reconciled route is #25 → #26 → #27 → #5 → #6 → #7 → #8 → #9 → #10. Decision issues #13–15 and map #11 record ownership, recovery and acceptance semantics. No external sending, bookings, legal-rights research, hosting, paid fallback, or general multi-agent product architecture is added.

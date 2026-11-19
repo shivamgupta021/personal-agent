@@ -163,3 +163,25 @@ parcel case asked which parcel. These are limited synthetic acceptance cases, no
 claim of general semantic recall accuracy.
 
 Trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/3e2c28e56e6692f98b7710c3409808c3
+
+## Milestone #26 live acceptance — 19 November 2026
+
+Real-model targeted correction and forgetting both passed. Each five-turn case
+included long context, archive recall, a mutation, and a later recall after service
+reconstruction. The corrected code superseded its old value; the forgotten code was
+reported unavailable; an unrelated Python fact survived both operations.
+Local archive/history inspection found neither old synthetic marker. All eight
+prior affected trace IDs returned zero observations via the Langfuse observation API.
+The test covers these observed synthetic cases, not universal semantic deletion.
+
+Experiment: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/experiments/results?baseline=2546889dd06181a7
+Post-forgetting trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/3160bce76fef2e3235edf9f951df65b3
+Post-correction trace: http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/1e5fcd302679aa21c0e8d8f9a717207c
+
+The bounded edit uses intent authorization, exact-quote redaction and semantic
+verification before a revision-checked transaction. It preserves unrelated original
+prose but discards derived summaries/tool wrappers to prevent stale copies from
+returning. Trace deletion conservatively covers earlier turns of the affected
+conversation; unrelated conversations remain untouched. Failed verification or
+oversized archives leave saved state unchanged. Tests must additionally cover
+stale in-flight saves, partial cleanup and retries.

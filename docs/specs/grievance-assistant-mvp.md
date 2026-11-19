@@ -168,3 +168,10 @@ questions in #13–#15 remain for subsequent milestones.
   responses. Cover access control, replies/citations, splitting, duplicates/restart, cancellation,
   and failures. A separate live owner-message round trip verifies real Telegram configuration
   and Langfuse ingestion. Code review baseline: a5892b8.
+
+
+## Autonomous completion authorization — 19 November 2026
+
+For this implementation run, the owner explicitly requested completion of all remaining tickets without waiting for per-milestone human review. Preserve the existing feature scopes, public test boundaries and acceptance gates. Each milestone still starts from merged main, receives independent standards/spec review, records deterministic and live evidence, and merges before its dependants begin. The owner receives a consolidated walkthrough afterward.
+
+The reconciled route is #25 → #26 → #27 → #5 → #6 → #7 → #8 → #9 → #10. Decision issues #13–15 and map #11 record ownership, recovery and acceptance semantics. No external sending, bookings, legal-rights research, hosting, paid fallback, or general multi-agent product architecture is added.

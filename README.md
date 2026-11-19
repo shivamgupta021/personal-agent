@@ -313,3 +313,28 @@ Open the printed Langfuse experiment URL, then an item's trace. Inspect
 `recall_conversation` input/output and the subsequent model answer; verify cited
 message IDs and that newer corrections take precedence. Scores are coarse text
 checks, not semantic proof.
+
+### Correct or forget selected conversation facts
+
+Use ordinary messages such as “Correction: my parcel code is ABC-2” or “Forget my
+parcel code, but keep my comparison language.” The agent verifies current intent,
+proposes exact-quote edits, checks that unrelated prose is preserved, and commits
+atomically. A successful edit ends the old run so stale context cannot be saved back.
+
+This removes derived summaries/tool copies and rebuilds bounded recent context from
+sanitized originals; other retained originals remain available through recall. It
+conservatively requests deletion of prior traces for that conversation because they
+may repeat its context. Local success and pending trace cleanup are reported separately.
+Say “retry trace cleanup” to retry asynchronous or failed Langfuse deletion. External
+Telegram/provider copies and independent backups are outside this guarantee.
+
+Ambiguous intent, unverifiable edits, and archives beyond the bounded edit budget
+leave saved content unchanged. Semantic selection remains model-dependent; review
+important changes. Run the synthetic real-model checks with:
+
+```bash
+uv run python manage.py evaluate_conversation --facts
+```
+
+Those experiments use separate trace roots for each application turn, so an open
+experiment parent cannot recreate a deleted trace containing an earlier synthetic fact.
