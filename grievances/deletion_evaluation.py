@@ -198,7 +198,11 @@ class DeletionScenario:
             scenario.checks['old_create_replay_cannot_resurrect'] = await scenario.service().store.get_case(scenario.owner, alpha.id) is None
             scenario.checks['only_unrelated_case_remains'] = [case.id for case in await scenario.service().store.list_cases(scenario.owner)] == [beta.id]
             # A later selected-case request must not recover deleted material from memory.
-            await scenario.turn('Do you still have the deleted case details?', forbidden=self.PRIVATE)
+            post_delete = await scenario.turn('Do you still have the deleted case details?', forbidden=self.PRIVATE)
+            meaningful = (*self.PRIVATE, 'Lumen', 'kettle', '2400', '2026-11-02', '2026-11-05', self.REPLY)
+            scenario.checks['post_delete_reply_excludes_deleted_facts'] = not any(
+                marker.casefold().replace(',', '') in post_delete.casefold().replace(',', '') for marker in meaningful)
+            safe_post_delete = post_delete if scenario.checks['post_delete_reply_excludes_deleted_facts'] else '[Omitted: deleted facts were disclosed.]'
             scenario.checks['post_delete_requests_do_not_recreate_content'] = not any((await self.inventory.case_counts(scenario.owner, alpha.id)).values())
             scenario.checks['no_private_case_forwarded_to_general_research'] = not scenario.public_messages
             scenario.checks['fixture_web_requests_exclude_private_identifiers'] = all(marker not in json.dumps(fixtures.requests) for marker in self.PRIVATE)
@@ -210,6 +214,7 @@ class DeletionScenario:
                 'checks': scenario.checks, 'before_delete_row_counts': counts_before, 'after_delete_row_counts': counts_after,
                 'deletion_response': self.safe_confirmation(deletion_answer, redactions),
                 'replay_response': self.safe_confirmation(replay_answer, redactions),
+                'post_delete_response': safe_post_delete,
                 'remaining_case': survivor_data,
                 'independent_preferences': [{'key': item.key, 'value': item.value} for item in preferences_before],
                 'note': 'Pre-deletion runtime answers, proposals, model inputs and case content are intentionally omitted. '

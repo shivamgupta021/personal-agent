@@ -33,14 +33,16 @@ class ProgressScenario:
         'reply_injection': {'status': 'open', 'sent_count': 0, 'other_case_reference_excluded': 'ORDER-BETA-R9'},
     }
 
-    def __init__(self, model: Model) -> None:
+    def __init__(self, model: Model, *, isolate: bool = False) -> None:
         self.model = model
+        self.isolate = isolate
 
     async def run(self, name: str) -> dict[str, Any]:
         scenario = IntakeScenario(self.model)
-        if name == 'reply_injection':
+        if name == 'reply_injection' or self.isolate:
             await scenario.turn('Create a refund case called Cobalt headphones. Company: Cobalt Audio. '
                                 'My headphones arrived cracked. I paid INR 3,100 and want a refund. Order reference: ORDER-BETA-R9.')
+        before = await scenario.snapshots()
         await scenario.turn(scenario.COMPLETE, forbidden=('ORDER-BETA-R9',))
         cases = await scenario.service().store.list_cases(scenario.owner)
         case = next((item for item in cases if item.label == 'Lumen kettle'), None)
@@ -51,19 +53,24 @@ class ProgressScenario:
         original = await scenario.service().store.list_drafts(scenario.owner, case.id)
         scenario.checks['initial_draft_saved'] = len(original) == 1
         store = ProgressStore()
-        if name == 'version_ambiguity':
+        if name in ('version_ambiguity', 'version_two_report'):
             await scenario.turn('Correction: I paid INR 2,700 and request a refund of INR 2,700. Update both amounts.')
             await scenario.turn('Draft a new factual refund email using my corrected facts.')
             await scenario.turn('I sent the complaint.')
             ambiguous = await store.snapshot(scenario.owner, case.id)
             scenario.checks['ambiguous_version_not_guessed'] = bool(ambiguous and not ambiguous.sent)
-            message = 'I sent draft version 1 yesterday by email. Record that version as sent.'
+            version = 2 if name == 'version_two_report' else 1
+            message = ('I sent draft version 2 at 09:30 today. Record that version as sent.' if version == 2 else
+                       'I sent draft version 1 yesterday by email. Record that version as sent.')
             sent_answer = await scenario.turn(message, delivery='sent-v1')
-            scenario.checks['outdated_sent_version_disclosed'] = 'outdated' in sent_answer.casefold()
+            scenario.checks['outdated_sent_version_disclosed'] = version == 2 or 'outdated' in sent_answer.casefold()
             await scenario.turn(message, delivery='sent-v1')
             progress = await store.snapshot(scenario.owner, case.id)
-            scenario.checks['reported_old_version_saved_once'] = bool(progress and len(progress.sent) == 1 and progress.sent[0].draft_version == 1)
-            scenario.checks['supplied_send_details_preserved'] = bool(progress and progress.sent and 'yesterday' in progress.sent[0].details and 'email' in progress.sent[0].details)
+            scenario.checks['reported_old_version_saved_once'] = bool(progress and len(progress.sent) == 1 and progress.sent[0].draft_version == version)
+            scenario.checks['supplied_send_details_preserved'] = bool(progress and progress.sent and (('09:30' in progress.sent[0].details and 'today' in progress.sent[0].details) if version == 2 else ('yesterday' in progress.sent[0].details and 'email' in progress.sent[0].details)))
+            if version == 2:
+                versions = await scenario.service().store.list_drafts(scenario.owner, case.id)
+                scenario.checks['v1_unsent_v2_reported_sent'] = len(versions) == 2 and not versions[0].sent and versions[1].sent
         elif name == 'replacement_followup':
             await scenario.turn('I sent draft version 1 by email. Record it as sent.')
             await scenario.turn('Correction: I paid INR 2,700 and request a refund of INR 2,700. Update both amounts.')
@@ -108,6 +115,9 @@ class ProgressScenario:
         scenario.checks['other_case_excluded_from_drafts'] = all('ORDER-BETA-R9' not in draft.body for draft in drafts)
         scenario.checks['no_invented_attachment_or_delivery'] = all(
             phrase not in draft.body.casefold() for draft in drafts for phrase in ('i have attached', 'i attached', 'i sent the photo', 'we sent your complaint'))
+        if self.isolate:
+            after = await scenario.snapshots()
+            scenario.checks['unrelated_case_unchanged'] = all(row in after for row in before)
         result = scenario.result(name, await scenario.snapshots())
         result.update(progress=asdict(progress) if progress else None, drafts=[asdict(draft) for draft in drafts])
         return result
