@@ -5,7 +5,9 @@ description = "A terminal research agent using ChatGPT subscription access and l
 requires-python = ">=3.12"
 dependencies = [
     "django==5.2.19",
+    "google-auth-oauthlib>=1.5.0",
     "httpx2==2.16.2",
+    "keyring>=25.7.0",
     "langfuse==5.2.0",
     "openai==3.52.0",
     "opentelemetry-exporter-otlp-proto-http==1.45.2",
@@ -33,4 +35,9 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["grievances", "preferences", "conversations", "config", "core", "research", "subscriptions", "telegram_bot", "tests", "manage.py"]
+untyped_calls_exclude = ["google", "google_auth_oauthlib", "keyring.backends.macOS"]
+files = ["gmail", "grievances", "preferences", "conversations", "config", "core", "research", "subscriptions", "telegram_bot", "tests", "manage.py"]
+
+[[tool.mypy.overrides]]
+module = ["google.*", "google_auth_oauthlib.*"]
+ignore_missing_imports = true

@@ -595,3 +595,47 @@ Its local record is `supplementary-final.json` in the same evidence bundle.
   therefore do not mean the case tools returned empty results.
 - This assistant prepares drafts and records your reports. It does not send complaints,
   contact a company, attach documents, book anything or make payments.
+
+## Gmail connection (first milestone; live setup pending)
+
+The connection layer is implemented and tested with controlled Google responses. It has
+not yet been authorized against the owner's Gmail account or exercised against their real
+Keychain. Email search, importing correspondence and Gmail draft export are later milestones.
+No model or Gmail message endpoint is used by these commands.
+
+When back at the Mac, create a dedicated Google Cloud project, enable Gmail API, configure
+its OAuth audience/test user, and download a **Desktop app** OAuth client JSON. Save it under
+ignored `.local/`, then set `GMAIL_CLIENT_FILE=.local/google-desktop-client.json` in `.env`.
+Relative paths resolve from this repository. `TELEGRAM_OWNER_ID` binds the connection to the
+configured owner; no Gmail password belongs in `.env`.
+
+```sh
+uv run python manage.py gmail_connect --email your-address@gmail.com
+uv run python manage.py gmail_status
+uv run python manage.py gmail_disconnect
+```
+
+Connect opens the system browser for consent and checks that Google's profile matches the
+expected address. This milestone requests exactly `gmail.readonly`; the callback is loopback
+only and uses PKCE/state validation. Consent times out after three minutes. A mailbox change
+requires `--replace-account`; failed authorization/verification preserves the prior local
+connection. A rejected consent may still have established a Google-side grant: inspect your
+Google account permissions if needed. Replacing a mailbox does not automatically revoke the
+old mailbox's Google-side grant.
+
+Credentials use macOS Keychain. Two slots retain the active and previous write so a failed
+replacement cannot erase the working grant; only the atomic active-slot marker lives in
+`.local/gmail/`. Disconnect disables that marker first and clears both slots. It reports
+Google revocation separately; if revocation is unconfirmed, remove the application's access
+in your Google account. Keychain cleanup failures are visible and can be retried with the
+same disconnect command. A dedicated project avoids revocation affecting unrelated clients.
+
+`gmail_status` verifies the profile and refreshes expired credentials; it is a network check,
+not merely an inspection of a saved flag. External Google apps left in Testing have a seven-day
+refresh-token lifetime for Gmail scopes. A revoked grant requires reconnecting. There is no
+plaintext credential fallback, automatic inbox access, sending operation or background sync.
+
+Controlled checks: `uv run pytest -q tests/gmail`. These test the real OAuth parsing library
+with synthetic callbacks and HTTP responses; they do not replace the later live consent check.
+See [Gmail design](docs/specs/gmail-case-integration.md) and
+[primary-source research](docs/research/gmail-integration.md) for the staged plan and scope limits.
