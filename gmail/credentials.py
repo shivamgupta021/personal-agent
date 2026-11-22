@@ -40,10 +40,10 @@ class KeychainStore:
             return None
         slot = self.pointer.read_text()
         if slot not in ('0', '1'):
-            raise GmailError('Gmail credential state is invalid. Reconnect Gmail.')
+            raise GmailError('Gmail credential state is invalid. Run gmail_disconnect, then reconnect Gmail.')
         raw = self.backend.get_password(KEYCHAIN_SERVICE, self.account + ':' + slot)
         if raw is None:
-            raise GmailError('Gmail credentials are unavailable. Reconnect Gmail.')
+            raise GmailError('Gmail credentials are unavailable. Run gmail_disconnect, then reconnect Gmail.')
         data = json.loads(raw)
         return Connection(data['email'], Credentials.from_authorized_user_info(json.loads(data['credentials'])))
 

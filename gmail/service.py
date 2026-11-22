@@ -51,7 +51,10 @@ class GmailService:
         with self.operation():
             if '@' not in expected_email or any(c.isspace() for c in expected_email):
                 raise GmailError('Provide the expected Gmail address using --email.')
-            previous = self.store.load()
+            try:
+                previous = self.store.load()
+            except Exception:
+                raise GmailError('Existing Gmail credentials could not be read. Unlock Keychain and retry, or run gmail_disconnect before reconnecting.') from None
             if previous and previous.email.casefold() != expected_email.casefold() and not replace_account:
                 raise GmailError('A different mailbox is connected. Use --replace-account to change it explicitly.')
             credentials = self.client.authorize(client_file, expected_email)

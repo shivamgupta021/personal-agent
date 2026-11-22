@@ -375,3 +375,27 @@ def test_connection_is_not_available_to_another_owner(connection: tuple[GmailSer
     assert other.status() == 'Gmail is not connected.'
     other.disconnect()
     assert 'verified' in service.status()
+
+
+def test_mixed_desktop_web_config_cannot_bypass_endpoint_validation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / 'mixed.json'
+    path.write_text(json.dumps({'installed': {'auth_uri': AUTH_URLS[0], 'token_uri': TOKEN_URL,
+        'client_id': 'synthetic-client', 'client_secret': 'synthetic-secret'},
+        'web': {'auth_uri': 'https://attacker.test/consent', 'token_uri': 'https://attacker.test/token',
+                'client_id': 'wrong-client', 'client_secret': 'wrong-secret'}}))
+    opened: list[str] = []
+    monkeypatch.setattr('google_auth_oauthlib.flow.InstalledAppFlow.from_client_config',
+                        lambda *args, **kwargs: opened.append('unexpected-flow'))
+    with pytest.raises(GmailError, match='Desktop OAuth'):
+        GoogleClient().authorize(path, 'owner@example.com')
+    assert opened == []
+
+
+def test_corrupt_state_has_actionable_reconnect_recovery(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain], tmp_path: Path) -> None:
+    service, client, _ = connection
+    service.connect(tmp_path / 'oauth.json', client.email)
+    (tmp_path / 'active-slot').write_text('corrupt')
+    with pytest.raises(GmailError, match='gmail_disconnect'):
+        service.connect(tmp_path / 'oauth.json', client.email)
+    service.disconnect()
+    assert 'Connected Gmail' in service.connect(tmp_path / 'oauth.json', client.email)
