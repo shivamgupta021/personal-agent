@@ -38,3 +38,5 @@ class CorrespondenceSnapshot:
     selected_thread: str = ''
     messages: list[ImportedMessage] = field(default_factory=list)
     truncated: bool = False
+    pending_goal: str = ''
+    pending_question: str = ''

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from grievances.service import ApplicationService
@@ -370,6 +370,117 @@ def test_gmail_stops_before_broader_fallback_after_candidates_found(tmp_path: Pa
         answer = await harness.send('Search Gmail for this case')
         assert 'Gmail candidates' in answer
         assert harness.searches == 1
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+class AssistanceHarness(MailHarness):
+    match_allowed = True
+
+    def model(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if not info.output_tools:
+            assert 'PRIVATE-BODY' in str(messages)
+            return ModelResponse(parts=[TextPart('I found the booking email. It does not confirm a refund. The next step is to ask support for its status.')])
+        properties = info.output_tools[0].parameters_json_schema.get('properties', {})
+        if 'reference' in properties:
+            part = messages[-1].parts[0]
+            assert isinstance(part, UserPromptPart)
+            payload = json.loads(str(part.content))
+            reference = payload['previews'][0]['reference'] if self.match_allowed else ''
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                {'reference': reference, 'question': 'Was this the November booking or the December booking?'})])
+        if (self.text.startswith('Help') or self.text == 'The second one' or self.text == 'I agree to email processing') and 'action' in properties:
+            part = messages[-1].parts[0]
+            assert isinstance(part, UserPromptPart)
+            payload = json.loads(str(part.content))
+            case_id = next((case['id'] for case in payload['case_labels'] if case['label'] == 'Kettle'), '')
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                {'action': 'case_help', 'case_id': case_id, 'label': 'Kettle', 'intent_quote': payload['current_request']})])
+        return super().model(messages, info)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('match_allowed', [True, False])
+def test_ordinary_help_reads_matching_mail_or_asks_natural_question(tmp_path: Path, match_allowed: bool) -> None:
+    harness = AssistanceHarness(tmp_path)
+    harness.match_allowed = match_allowed
+    async def run() -> None:
+        await harness.send('Create case Kettle')
+        await harness.send('I agree to email processing')
+        reply = await harness.send('Help me get my Kettle refund')
+        assert harness.searches == 1
+        assert harness.full_reads == int(match_allowed)
+        assert 'candidate' not in reply.lower()
+        assert 'import' not in reply.lower()
+        if match_allowed:
+            assert 'does not confirm a refund' in reply
+            again = await harness.send('Help me get my Kettle refund')
+            assert 'does not confirm a refund' in again
+            assert harness.full_reads == 2
+        else:
+            assert 'November booking or the December booking' in reply
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_help_refreshes_mail_and_reports_failure_instead_of_stale_status(tmp_path: Path) -> None:
+    harness = AssistanceHarness(tmp_path)
+    async def run() -> None:
+        await harness.send('Create case Kettle')
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+        harness.fail_read = True
+        reply = await harness.send('Help me get my Kettle refund')
+        assert harness.full_reads == 2
+        assert 'could not' in reply.lower()
+        assert 'does not confirm a refund' not in reply
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_new_grievance_resumes_after_consent_without_repeating_goal(tmp_path: Path) -> None:
+    harness = AssistanceHarness(tmp_path)
+    async def run() -> None:
+        first = await harness.send('Help me get my Kettle refund')
+        assert 'model provider' in first
+        assert harness.searches == 0
+        answer = await harness.send('I agree to email processing')
+        assert 'does not confirm a refund' in answer
+        assert harness.full_reads == 1
+    exporter = InMemorySpanExporter()
+    try:
+        with override_settings(LANGFUSE_CAPTURE_CONTENT=True, LANGFUSE_CAPTURE_PRIVATE_CONTENT=True):
+            tracing.shutdown()
+            tracing.configure(exporter)
+            asyncio.run(run())
+            tracing.flush()
+            payloads = '\n'.join(span.to_json() for span in exporter.get_finished_spans())
+            assert 'PRIVATE-BODY' not in payloads and 'PRIVATE-SUBJECT' not in payloads
+    finally:
+        tracing.shutdown()
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_natural_clarification_reuses_saved_email_choices(tmp_path: Path) -> None:
+    harness = AssistanceHarness(tmp_path)
+    harness.match_allowed = False
+    async def run() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+        harness.match_allowed = True
+        answer = await harness.send('The second one')
+        assert 'does not confirm a refund' in answer
+        assert harness.searches == 1
+        assert harness.full_reads == 1
     try:
         asyncio.run(run())
     finally:

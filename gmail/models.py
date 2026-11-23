@@ -20,4 +20,6 @@ class CaseMailbox(models.Model):
     selected_thread: models.CharField[str, str] = models.CharField(max_length=128, default='')
     messages = models.JSONField(default=list)
     truncated: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    pending_goal: models.TextField[str, str] = models.TextField(default='')
+    pending_question: models.TextField[str, str] = models.TextField(default='')
     updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now=True)

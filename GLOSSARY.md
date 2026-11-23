@@ -32,7 +32,7 @@ Whether a published policy covers the circumstances of a particular grievance ca
 A proposed message continuing an existing grievance after an earlier complaint, such as a response to the company's reply.
 
 **Selected correspondence thread**:
-An email conversation the person has identified as relevant to a particular grievance case. Selecting it for that case does not itself request automatic monitoring of future replies.
+An email conversation identified as relevant to a particular grievance case, either by the person or by the assistant acting on an unambiguous case-help request. Selecting it for that case does not itself request automatic monitoring of future replies.
 
 **Case monitoring**:
 Owner-requested checking for new replies in a case's selected correspondence threads, with notifications about those replies. Monitoring does not authorize drafting or sending a response.

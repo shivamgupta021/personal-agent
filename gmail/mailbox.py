@@ -62,18 +62,19 @@ class Mailbox:
             items: list[ImportedMessage] = []
             remaining = constants.MAX_TEXT_CHARS
             truncated = len(data.get('messages', [])) > constants.MAX_MESSAGES
-            for message in data.get('messages', [])[:constants.MAX_MESSAGES]:
+            for message in reversed(data.get('messages', [])[-constants.MAX_MESSAGES:]):
                 payload = message.get('payload', {})
                 headers = self._headers(payload)
                 text, attachments, clipped = self._text(payload)
-                truncated |= clipped or len(text) > remaining
+                allowance = min(remaining, constants.MAX_MESSAGE_TEXT_CHARS)
+                truncated |= clipped or len(text) > allowance
                 items.append(ImportedMessage(message_id=self._identifier(message.get('id')), thread_id=thread_id,
                     sender=headers.get('from', '')[:constants.MAX_PREVIEW_CHARS],
                     subject=headers.get('subject', '')[:constants.MAX_PREVIEW_CHARS],
                     date=headers.get('date', '')[:constants.MAX_PREVIEW_CHARS],
-                    text=text[:remaining], unread_attachments=attachments))
-                remaining = max(0, remaining - len(text))
-            return MailResult(connection.email, items, truncated)
+                    text=text[:allowance], unread_attachments=attachments))
+                remaining = max(0, remaining - min(len(text), allowance))
+            return MailResult(connection.email, list(reversed(items)), truncated)
 
     @staticmethod
     def _identifier(value: Any) -> str:

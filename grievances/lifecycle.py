@@ -20,7 +20,8 @@ class ApplicationTurn:
 
     async def prepare(self, turn: OwnerTurn,
                       execute: Callable[[OwnerTurn, int], Awaitable[str]]) -> PreparedReply:
-        token = email_private.set(await Correspondence.consented(turn.owner_id))
+        consenting = turn.text.strip().rstrip('.!').casefold() == 'i agree to email processing'
+        token = email_private.set(consenting or await Correspondence.consented(turn.owner_id))
         try:
             return await self._prepare(turn, execute)
         finally:

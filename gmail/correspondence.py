@@ -1,8 +1,13 @@
 """Case correspondence use cases; mail remains evidence, never owner instructions."""
 from dataclasses import asdict, replace
+import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from uuid import uuid4
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gmail.assistance import CaseAssistance
 
 from asgiref.sync import sync_to_async
 import httpx2
@@ -17,6 +22,7 @@ from gmail.planner import GmailQueryPlanner
 from gmail.records import Candidate, ImportedMessage, MailResult, CorrespondenceSnapshot
 from gmail.models import CaseMailbox, EmailConsent
 from grievances.mutations import CaseMutation
+from grievances.models import CaseSelection
 from grievances.store import CaseView, SelectionView
 
 CONSENT_MESSAGE = ('Selected email may be processed by the configured model provider, not only on your Mac. '
@@ -36,7 +42,25 @@ class Correspondence:
     @staticmethod
     async def accept(owner: str) -> str:
         await EmailConsent.objects.aget_or_create(owner_id=owner)
-        return 'Email processing enabled. Select a case and ask to search Gmail. Nothing has been read yet.'
+        return 'Email processing enabled. Tell me what you need help with; I can look for the relevant emails.'
+
+    @sync_to_async
+    def pending_goal(self, turn: OwnerTurn) -> str:
+        selected = CaseSelection.objects.filter(owner_id=turn.owner_id, conversation_id=turn.conversation_id).first()
+        row = CaseMailbox.objects.filter(case_id=selected.case_id).first() if selected else None
+        return row.pending_goal if row else ''
+
+    @sync_to_async
+    def remember_goal(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
+                      question: str = '') -> None:
+        with CaseMutation(turn, selection, current, operation='read') as mutation:
+            if mutation.failure:
+                raise GmailError('Case changed')
+            row, _ = CaseMailbox.objects.get_or_create(case_id=current.id, defaults={'mailbox': ''})
+            if not row.pending_goal:
+                row.pending_goal = turn.text
+            row.pending_question = question
+            row.save()
 
     async def run(self, turn: OwnerTurn, action: str, selection: SelectionView,
                   current: CaseView | None, reference: str = '',
@@ -56,33 +80,7 @@ class Correspondence:
             if action == 'gmail_search':
                 if self.planner is None:
                     return 'Gmail query planning is unavailable in this session.'
-                identifiers = {key: current.facts[key] for key in ('company', 'order_reference') if current.facts.get(key)}
-                await self._snapshot(turn, selection, current)
-                with tracing.operation('gmail.plan_queries', {}, kind='agent', private=True) as span:
-                    plan = await self.planner.run(turn.text, current.label, identifiers, usage, request_limit)
-                    span.set_attribute('gmail.query_count', len(plan.queries))
-                items: list[Candidate] = []
-                seen: set[str] = set()
-                account = ''
-                truncated = False
-                with self.mailbox() as mailbox:
-                    for query in plan.queries:
-                        await self._snapshot(turn, selection, current)
-                        with tracing.operation('gmail.search', {}, private=True) as span:
-                            found = await sync_to_async(mailbox.search)(query)
-                            span.set_attribute('gmail.results', len(found.items))
-                            span.set_attribute('gmail.truncated', found.truncated)
-                        if account and account != found.mailbox:
-                            raise GmailError('Mailbox changed during search')
-                        account = found.mailbox
-                        truncated |= found.truncated
-                        for candidate in found.items:
-                            if candidate.thread_id not in seen:
-                                seen.add(candidate.thread_id)
-                                items.append(candidate)
-                        if items:
-                            break  # Broader alternatives are only for an empty preceding search.
-                result = MailResult(account, items[:constants.MAX_CANDIDATES], truncated)
+                result = await self._search(turn, selection, current, usage, request_limit)
                 return await self._save_search(turn, selection, current, result)
             if action == 'gmail_select':
                 if not reference or reference not in turn.text:
@@ -102,6 +100,99 @@ class Correspondence:
         except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
             return 'Gmail could not complete this request. Check the connection or search again; no new correspondence was saved.'
 
+    async def _search(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
+                      usage: RunUsage | None, request_limit: int | None) -> MailResult[Candidate]:
+        if self.planner is None or self.mailbox is None:
+            raise GmailError('Gmail search is unavailable')
+        identifiers = {key: current.facts[key] for key in ('company', 'order_reference') if current.facts.get(key)}
+        await self._snapshot(turn, selection, current)
+        with tracing.operation('gmail.plan_queries', {}, kind='agent', private=True) as span:
+            plan = await self.planner.run(turn.text, current.label, identifiers, usage, request_limit)
+            span.set_attribute('gmail.query_count', len(plan.queries))
+        items: list[Candidate] = []
+        seen: set[str] = set()
+        account = ''
+        truncated = False
+        with self.mailbox() as mailbox:
+            for query in plan.queries:
+                await self._snapshot(turn, selection, current)
+                with tracing.operation('gmail.search', {}, private=True) as span:
+                    found = await sync_to_async(mailbox.search)(query)
+                    span.set_attribute('gmail.results', len(found.items))
+                    span.set_attribute('gmail.truncated', found.truncated)
+                if account and account != found.mailbox:
+                    raise GmailError('Mailbox changed during search')
+                account = found.mailbox
+                truncated |= found.truncated
+                for candidate in found.items:
+                    if candidate.thread_id not in seen:
+                        seen.add(candidate.thread_id)
+                        items.append(candidate)
+                if items:
+                    break  # Broader alternatives are only for an empty preceding search.
+        result = MailResult(account, items[:constants.MAX_CANDIDATES], truncated)
+        return result
+
+    async def assist(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
+                     usage: RunUsage, assistant: 'CaseAssistance') -> str:
+        try:
+            row = await self._snapshot(turn, selection, current)
+            goal = row.pending_goal or turn.text
+            request = json.dumps({'original_goal': goal, 'owner_reply': turn.text})
+            if row.selected_thread:
+                if self.mailbox is None:
+                    raise GmailError('Gmail is unavailable')
+                with self.mailbox() as mailbox, tracing.operation('gmail.refresh_thread', {}, private=True) as span:
+                    fresh = await sync_to_async(mailbox.thread)(row.selected_thread, row.mailbox)
+                    span.set_attribute('gmail.messages', len(fresh.items))
+                    span.set_attribute('gmail.truncated', fresh.truncated)
+                await self._save_refresh(turn, selection, current, row.selected_thread, fresh)
+                row = await self._snapshot(turn, selection, current)
+            else:
+                if not row.pending_question or not row.candidates:
+                    found = await self._search(replace(turn, text=request), selection, current, usage, constants.ASSISTANCE_REQUEST_LIMIT)
+                    await self._save_search(turn, selection, current, found)
+                    row = await self._snapshot(turn, selection, current)
+                if not row.candidates:
+                    question = 'I could not find a matching email. Do you know the sender or roughly when it arrived?'
+                    await self.remember_goal(turn, selection, current, question)
+                    return question
+                match_request = json.dumps({'original_goal': row.pending_goal, 'previous_question': row.pending_question, 'owner_reply': turn.text})
+                match = await assistant.match(match_request, current, [asdict(item) for item in row.candidates], usage)
+                candidate = next((item for item in row.candidates if item.reference == match.reference), None)
+                if candidate is None:
+                    question = match.question or 'I found emails, but cannot reliably identify the right conversation. Which booking or application is this about?'
+                    await self.remember_goal(turn, selection, current, question)
+                    return question
+                if self.mailbox is None:
+                    raise GmailError('Gmail is unavailable')
+                await self._snapshot(turn, selection, current)
+                with self.mailbox() as mailbox, tracing.operation('gmail.read_thread', {}, private=True) as span:
+                    result = await sync_to_async(mailbox.thread)(candidate.thread_id, row.mailbox)
+                    span.set_attribute('gmail.messages', len(result.items))
+                    span.set_attribute('gmail.truncated', result.truncated)
+                await self._save_selection(turn, selection, current, candidate.reference, candidate.thread_id, result)
+                row = await self._snapshot(turn, selection, current)
+            answer = await assistant.explain(request, current,
+                [asdict(message) for message in row.messages], row.truncated, usage)
+            await self._snapshot(turn, selection, current)
+            return answer
+        except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
+            return 'I could not read the relevant emails just now. Please try again; I have not sent anything.'
+
+    @sync_to_async
+    def _save_refresh(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
+                      thread: str, result: MailResult[ImportedMessage]) -> None:
+        with CaseMutation(turn, selection, current, operation='read') as mutation:
+            if mutation.failure:
+                raise GmailError('Case changed')
+            row = CaseMailbox.objects.select_for_update().get(case_id=current.id)
+            if row.mailbox != result.mailbox or row.selected_thread != thread:
+                raise GmailError('Correspondence changed')
+            row.messages = [asdict(item) for item in result.items]
+            row.truncated = result.truncated
+            row.save()
+
     @sync_to_async
     def _snapshot(self, turn: OwnerTurn, selection: SelectionView, current: CaseView) -> CorrespondenceSnapshot:
         with CaseMutation(turn, selection, current, operation='read') as mutation:
@@ -110,7 +201,7 @@ class Correspondence:
             row = CaseMailbox.objects.filter(case_id=current.id).first()
             return CorrespondenceSnapshot() if row is None else CorrespondenceSnapshot(row.mailbox,
                 [Candidate(**item) for item in row.candidates], row.selected_thread,
-                [ImportedMessage(**item) for item in row.messages], row.truncated)
+                [ImportedMessage(**item) for item in row.messages], row.truncated, row.pending_goal, row.pending_question)
 
     @sync_to_async
     def _save_search(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, result: MailResult[Candidate]) -> str:
@@ -143,6 +234,7 @@ class Correspondence:
             if row.mailbox != result.mailbox or not any(item['reference'] == reference for item in row.candidates):
                 raise GmailError('Search changed')
             row.selected_thread, row.messages, row.truncated = thread, [asdict(item) for item in result.items], result.truncated
+            row.pending_goal, row.pending_question = '', ''
             row.save()
             return ('Correspondence selected and saved for this case. Gmail originals are unchanged; monitoring is off. '
                 f'{len(result.items)} messages imported. ' +

@@ -1,6 +1,7 @@
 """Route private intake before any public conversation history or web-enabled agent."""
 
 import asyncio
+from dataclasses import replace
 from collections.abc import Awaitable, Callable
 import re
 
@@ -8,6 +9,7 @@ import re
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, UsageLimitExceeded, RunCancelled
 from pydantic_ai.models import Model
 
+from gmail.assistance import CaseAssistance
 from gmail.correspondence import Correspondence
 from gmail.factory import GmailFactory
 from gmail.planner import GmailQueryPlanner
@@ -63,7 +65,9 @@ class ApplicationService:
 
     async def _run(self, turn: OwnerTurn, epoch: int) -> str:
         if turn.text.strip().rstrip('.!').casefold() == 'i agree to email processing':
-            return await self.correspondence.accept(turn.owner_id)
+            accepted = await self.correspondence.accept(turn.owner_id)
+            pending = await self.correspondence.pending_goal(turn)
+            return await self._run(replace(turn, text=pending), epoch) if pending else accepted
         if self.is_memory_control(turn.text):
             return await self.memory(turn)
         replay = await self.store.replay(turn)
@@ -74,6 +78,9 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
+        if action.action == 'case_help':
+            return await CaseAssistance(self.model, self.store, self.correspondence).run(
+                turn, action, selection, current, usage)
         if action.action.startswith('gmail_'):
             return await self.correspondence.run(turn, action.action, selection, current,
                 action.gmail_reference, usage, constants.MAX_MODEL_REQUESTS)

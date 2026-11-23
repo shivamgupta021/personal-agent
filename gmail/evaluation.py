@@ -15,6 +15,11 @@ from langfuse import Evaluation, Langfuse
 from langfuse.api import DatasetItem
 from langfuse.experiment import ExperimentItem
 
+from pydantic_ai.models.wrapper import WrapperModel
+from pydantic_ai.models import ModelRequestParameters
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.settings import ModelSettings
+
 from core.tracing import tracing
 from core.turns import OwnerTurn
 from gmail.client import GoogleClient
@@ -48,6 +53,16 @@ class SyntheticGoogle(GoogleClient):
         return 'fictional@example.invalid'
 
 
+class SyntheticModelRecorder(WrapperModel):
+    async def request(self, messages: list[ModelMessage], model_settings: ModelSettings | None,
+                      model_request_parameters: ModelRequestParameters) -> ModelResponse:
+        result = await super().request(messages, model_settings, model_request_parameters)
+        self.records.append({'input': str(messages), 'output': str([part for part in result.parts if isinstance(part, (TextPart, ToolCallPart))])})
+        return result
+
+    records: list[dict[str, str]]
+
+
 class GmailExperiment:
     def __init__(self) -> None:
         self.queries: list[str] = []
@@ -61,9 +76,9 @@ class GmailExperiment:
             if self.licence and request.url.params['q'].strip().casefold() == '"licence approval"':
                 return httpx2.Response(200, json={'messages': []})
             return httpx2.Response(200, json={'messages': [{'id': 'a1', 'threadId': 'b1'}]})
-        message = {'id': 'a1', 'threadId': 'b1', 'snippet': 'Fictional licence decision' if self.licence else 'Fictional Lumen receipt', 'payload': {
-            'headers': [{'name': 'From', 'value': 'support@example.invalid'}, {'name': 'Subject', 'value': 'Fictional license application approved' if self.licence else 'Fictional Lumen order'}],
-            'mimeType': 'text/plain', 'body': {'data': base64.urlsafe_b64encode(b'Fictional license application approved.' if self.licence else b'Fictional receipt for order ORDER-Q7. Amount INR 2400.').decode()}}}
+        message = {'id': 'a1', 'threadId': 'b1', 'snippet': 'Licence application decision' if self.licence else 'Lumen receipt for order ORDER-Q7', 'payload': {
+            'headers': [{'name': 'From', 'value': 'support@example.invalid'}, {'name': 'Subject', 'value': 'License application approved' if self.licence else 'Lumen order ORDER-Q7'}],
+            'mimeType': 'text/plain', 'body': {'data': base64.urlsafe_b64encode(b'License application approved.' if self.licence else b'Receipt for order ORDER-Q7. Amount paid INR 2400. Your refund request is under review; it has not been approved.').decode()}}}
         return httpx2.Response(200, json={'id': 'b1', 'messages': [message]} if '/threads/' in request.url.path else message)
 
     @staticmethod
@@ -83,35 +98,31 @@ class GmailExperiment:
         self.licence = item.input.get('topic') == 'licence'
         with TemporaryDirectory() as directory, httpx2.Client(transport=httpx2.MockTransport(self.fixture)) as http:
             mail = Mailbox(GmailService(SyntheticCredentials(), SyntheticGoogle(), Path(directory)), http)
-            async with SubscriptionService(settings.SUBSCRIPTION_STATE_DIR).model() as model:
+            async with SubscriptionService(settings.SUBSCRIPTION_STATE_DIR).model() as raw_model:
+                model = SyntheticModelRecorder(raw_model)
+                model.records = []
                 app = ApplicationService(model, correspondence=Correspondence(lambda: nullcontext(mail), GmailQueryPlanner(model)))
-                requests = [('Create a case called licence approval.' if self.licence else 'Create a case called Lumen kettle. Company: Lumen. Order reference: ORDER-Q7.'),
-                    'I agree to email processing', item.input['search']]
+                requests = ['I agree to email processing', item.input['search']]
                 for index, request in enumerate(requests):
                     answers.append(await self.turn(app, owner, str(index), request))
-                match = re.search(r'([a-f0-9]{12}) —', answers[-1])
-                if match:
-                    answers.append(await self.turn(app, owner, 'select', 'Select Gmail candidate ' + match[1]))
-                    answers.append(await self.turn(app, owner, 'show', 'Show the selected Gmail correspondence and its source references.'))
-        return {'synthetic': True, 'answers': answers, 'queries': self.queries,
+        return {'synthetic': True, 'answers': answers, 'queries': self.queries, 'model_steps': model.records,
             'checks': {'search_reached': bool(self.queries),
-                'case_query': (any('licen' in query.casefold() or 'licenc' in query.casefold() for query in self.queries) if self.licence else any(word in query for query in self.queries for word in ('Lumen', 'ORDER-Q7'))),
                 'bounded_queries': 1 <= len(self.queries) <= 3,
-                'selected': len(answers) == 5 and 'saved for this case' in answers[3],
-                'attribution': len(answers) == 5 and 'Message a1' in answers[4] and ('license application approved' if self.licence else 'INR 2400') in answers[4]}}
+                'natural_reply': bool(answers[-1]) and 'Select Gmail candidate' not in answers[-1],
+                'email_evidence_used': ('approv' in answers[-1].lower() if self.licence else '2400' in answers[-1].replace(',', ''))}}
 
     @staticmethod
     def evaluate(*, output: dict[str, Any], **kwargs: Any) -> list[Evaluation]:
         return [Evaluation(name='gmail_correspondence_checks', value=int(all(output['checks'].values())), data_type='BOOLEAN',
-            comment='Real routing model, synthetic Gmail HTTP. Checks query relevance, selection and source attribution; review outputs for semantic quality.')]
+            comment='Real routing model, synthetic Gmail HTTP. Checks bounded search and natural evidence-based output; manual semantic review remains required.')]
 
     def run(self) -> dict[str, Any]:
         client = Langfuse(public_key=settings.LANGFUSE_PUBLIC_KEY, secret_key=settings.LANGFUSE_SECRET_KEY,
                           base_url=settings.LANGFUSE_BASE_URL)
         try:
-            dataset = 'gmail-correspondence-v1'
+            dataset = 'gmail-natural-journey-v1'
             client.create_dataset(name=dataset, description='Synthetic mail only; no connected Gmail access.')
-            for index, search in enumerate(('Search my Gmail for this case.', 'Find earlier order emails for the selected case in Gmail.', 'Find emails about my licence approval.')):
+            for index, search in enumerate(('Help me get my Lumen refund.', 'I need help getting my money back from Lumen.', 'Help me with my licence approval.')):
                 client.create_dataset_item(dataset_name=dataset, id=f'{dataset}-{index}', input={'search': search, 'topic': 'licence' if index == 2 else 'order'},
                     expected_output={'search': True, 'attribution': True})
             result = client.get_dataset(dataset).run_experiment(name='gmail-correspondence', task=self.task,
