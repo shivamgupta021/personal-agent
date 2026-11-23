@@ -237,7 +237,7 @@ class CaseStore:
                          'or start a new case using details you provide.')
             else:
                 case = None
-                reply = 'Please create or explicitly select a case, or clarify the case and requested action. Please specify whether to inspect facts or draft a refund email. For official research, review and confirm the public fields and official site first. You can report a sent version, save a company reply, request a follow-up or explicitly record an outcome. External sending is not available.'
+                reply = 'Please clarify which case you mean and what you would like me to do with it.'
             if case is not None and action.action in ('create', 'update', 'show') and outcome != 'existing':
                 CaseMessage.objects.create(case=case, role='user', text=turn.text)
                 CaseMessage.objects.create(case=case, role='assistant', text=reply)

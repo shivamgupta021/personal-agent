@@ -271,7 +271,7 @@ def test_deletion_erases_research_and_rejects_late_research_save() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize('action', ['memory', 'public'])
+@pytest.mark.parametrize('action', ['memory', 'public', 'conversation'])
 def test_literal_case_reply_cannot_become_general_memory_or_public_input(action: str) -> None:
     async def run() -> None:
         chat = ProgressConversation()

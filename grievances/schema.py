@@ -19,7 +19,7 @@ class SuppliedFact(BaseModel):
 
 
 class IntakeAction(BaseModel):
-    action: Literal['delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
+    action: Literal['delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'conversation', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
     clarification_reason: Literal['unspecified', 'deleted_details'] = Field(default='unspecified',
         description='Use deleted_details only when the owner asks about retrieving details of a deleted case; this selects a fixed explanation, not a deletion action.')
     case_id: str = ''

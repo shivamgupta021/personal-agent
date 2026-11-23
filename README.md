@@ -639,3 +639,18 @@ Controlled checks: `uv run pytest -q tests/gmail`. These test the real OAuth par
 with synthetic callbacks and HTTP responses; they do not replace the later live consent check.
 See [Gmail design](docs/specs/gmail-case-integration.md) and
 [primary-source research](docs/research/gmail-integration.md) for the staged plan and scope limits.
+
+### Integrated application routing regression
+
+The Telegram application router is an additional boundary in front of conversation and
+research services. Service-level conversation experiments alone do not validate that boundary.
+Run `uv run python manage.py evaluate_routing` to publish a real-model Langfuse experiment
+covering the original Python/Ruby acknowledgement and follow-up regression, archive recall,
+conversation while a case is selected, preference save/list/forget, public routing, and ambiguous
+case requests. Each turn reconstructs the application service; public web is a controlled boundary
+and still needs a separate live Firecrawl check. Review the experiment answers and proposals,
+not only its coarse scores. Synthetic case state is separate from the Telegram owner's state.
+
+Ordinary chat now uses the persistent no-web conversation runner; it does not require a case
+or silently deselect an existing one. The `application.turn` trace groups routing and conversation
+work, and `case.intake` metadata records `application.route`. Private content remains excluded.

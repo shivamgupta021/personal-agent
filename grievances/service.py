@@ -53,6 +53,11 @@ class ApplicationService:
         return (await self.deletion.delete(turn, case_id)).message
 
     async def prepare(self, turn: OwnerTurn) -> PreparedReply:
+        with tracing.operation('application.turn', {}, kind='agent', private=True) as span:
+            span.set_attribute('langfuse.session.id', turn.owner_id)
+            return await self._prepare(turn)
+
+    async def _prepare(self, turn: OwnerTurn) -> PreparedReply:
         epoch = await CaseOwnership().begin(turn)
         if epoch != await CaseOwnership().epoch(turn.owner_id):
             text = 'This delivery predates case deletion; nothing was recreated. Please send a new request.'
@@ -104,9 +109,10 @@ class ApplicationService:
         if len(encoded) > constants.MAX_CONTEXT_CHARS:
             return 'This case directory exceeds the intake context limit. Nothing changed.'
         usage = RunUsage()
-        with tracing.operation('case.intake', {}, kind='agent', private=True):
+        with tracing.operation('case.intake', {}, kind='agent', private=True) as span:
             result = await self.agent.run(encoded, usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                                           timeout=constants.RUN_TIMEOUT_SECONDS)
+            span.set_attribute('application.route', result.output.action)
         action = result.output
         if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up') and current:
             messages: list[str] = []
@@ -202,9 +208,9 @@ class ApplicationService:
             if action.action == 'draft':
                 return await DraftService(self.model, self.store).run(turn, selection, current, usage)
             return await self.store.read_drafts(turn, selection, current, action.draft_version, listing=action.action == 'list_drafts')
-        if action.action in ('memory', 'public') and not await self.store.general_allowed(turn, epoch):
+        if action.action in ('conversation', 'memory', 'public') and not await self.store.general_allowed(turn, epoch):
             return 'Case material cannot become general memory or public research. Please send a new independent request.'
-        if action.action == 'memory':
+        if action.action in ('conversation', 'memory'):
             if action.facts:
                 return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'
             return await self.memory(turn)
