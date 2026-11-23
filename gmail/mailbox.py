@@ -1,6 +1,8 @@
-"""Bounded, read-only Gmail HTTP operations and text-only MIME decoding."""
+"""Bounded Gmail reading and unsent draft creation and text-only MIME decoding."""
 import base64
 import json
+from email.message import EmailMessage
+from email.policy import SMTP
 from html import unescape
 import re
 from typing import Any
@@ -8,9 +10,9 @@ from typing import Any
 import httpx2
 
 from gmail import constants
-from gmail.errors import GmailError
+from gmail.errors import GmailError, DraftOutcomeUnknown
 from gmail.service import GmailService
-from gmail.records import Candidate, ImportedMessage, MailResult
+from gmail.records import Candidate, ImportedMessage, MailResult, DraftEnvelope
 
 
 class Mailbox:
@@ -72,9 +74,66 @@ class Mailbox:
                     sender=headers.get('from', '')[:constants.MAX_PREVIEW_CHARS],
                     subject=headers.get('subject', '')[:constants.MAX_PREVIEW_CHARS],
                     date=headers.get('date', '')[:constants.MAX_PREVIEW_CHARS],
-                    text=text[:allowance], unread_attachments=attachments))
+                    text=text[:allowance], unread_attachments=attachments, recipient=headers.get('to', '')[:1000],
+                    reply_to=headers.get('reply-to', '')[:1000], rfc_message_id=headers.get('message-id', '')[:1000],
+                    references=headers.get('references', '')[:4000]))
                 remaining = max(0, remaining - min(len(text), allowance))
             return MailResult(connection.email, list(reversed(items)), truncated)
+
+    def draft_capability(self, mailbox: str) -> None:
+        with self.connection.connected() as connection:
+            if connection.email.casefold() != mailbox.casefold():
+                raise GmailError('The connected Gmail account changed. Please check the account before creating a draft.')
+            self.connection.validate(connection.credentials, require_compose=True)
+
+    def create_draft(self, draft: DraftEnvelope) -> str:
+        with self.connection.connected() as connection:
+            self.connection.validate(connection.credentials, require_compose=True)
+            if connection.email.casefold() != draft.mailbox.casefold():
+                raise GmailError('The Gmail account changed; no draft was created.')
+            message = EmailMessage(policy=SMTP)
+            message['From'], message['To'], message['Subject'] = draft.mailbox, draft.recipient, draft.subject
+            if draft.thread_id:
+                self._identifier(draft.thread_id)
+                if not draft.reply_id:
+                    raise GmailError('The email lacks reply headers. No threaded draft was created.')
+                message['In-Reply-To'] = draft.reply_id
+                message['References'] = (draft.references + ' ' + draft.reply_id).strip()
+            if draft.marker:
+                message[constants.DRAFT_MARKER_HEADER] = draft.marker
+            message.set_content(draft.body)
+            payload: dict[str, Any] = {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode()}
+            if draft.thread_id:
+                payload['threadId'] = draft.thread_id
+            try:
+                response = self.http.post(constants.API_URL + '/drafts', json={'message': payload},
+                    headers={'Authorization': 'Bearer ' + str(connection.credentials.token)}, follow_redirects=False)
+            except httpx2.HTTPError:
+                raise DraftOutcomeUnknown('Google may have created the draft. Check Gmail Drafts before retrying; I will not create another copy automatically.') from None
+            if response.status_code >= 500 or response.status_code in (408, 429):
+                raise DraftOutcomeUnknown('Google did not confirm draft creation. Check Gmail Drafts before retrying; no automatic retry was made.')
+            if response.status_code not in (200, 201):
+                raise GmailError('Google rejected draft creation. Check draft permission; nothing was sent.')
+            try:
+                return self._identifier(response.json().get('id'))
+            except (ValueError, TypeError, GmailError):
+                raise DraftOutcomeUnknown('Google returned an unclear creation result. Check Gmail Drafts before retrying.') from None
+
+    def find_export(self, mailbox: str, marker: str) -> str | None:
+        """Recover only a positively matched draft; absence never authorizes retry."""
+        with self.connection.connected() as connection:
+            if connection.email.casefold() != mailbox.casefold():
+                raise GmailError('The connected Gmail account changed. Draft recovery stopped.')
+            token = str(connection.credentials.token)
+            listed = self._get('/drafts', token, {'maxResults': constants.DRAFT_RECONCILE_LIMIT})
+            matches = []
+            for item in listed.get('drafts', [])[:constants.DRAFT_RECONCILE_LIMIT]:
+                identifier = self._identifier(item.get('id'))
+                draft = self._get('/drafts/' + identifier, token, {'format': 'full'})
+                headers = self._headers(draft.get('message', {}).get('payload', {}))
+                if headers.get(constants.DRAFT_MARKER_HEADER.lower(), '').strip() == marker:
+                    matches.append(identifier)
+            return matches[0] if len(matches) == 1 else None
 
     @staticmethod
     def _identifier(value: Any) -> str:

@@ -10,7 +10,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.tracing import tracing
 from core.turns import OwnerTurn
-from gmail.models import CaseMailbox
+from gmail.models import CaseMailbox, EmailConsent
 from grievances import constants
 from grievances.correspondence import CompanyReplyParser, ParsedCompanyReply
 from grievances.policy_store import PolicyStore
@@ -131,7 +131,8 @@ class CaseIntake:
         preferences = await PreferenceStore().list(turn.owner_id)
         pending = await CaseMailbox.objects.filter(case_id=current.id).afirst() if current else None
         directory: dict[str, object] = {
-            'mail_pending': {'question': pending.pending_question, 'choices': pending.candidates} if pending and pending.pending_question else None,
+            'gmail_enabled': await EmailConsent.objects.filter(owner_id=turn.owner_id).aexists(),
+            'mail_pending': {'goal': pending.pending_goal, 'question': pending.pending_question, 'choices': pending.candidates} if pending and pending.pending_question else None,
             'current_request': turn.text, 'research_status': research_status, 'draft_versions': draft_versions,
             'selected_case': {'id': current.id} if current else None,
             'case_labels': [asdict(case) for case in cases],

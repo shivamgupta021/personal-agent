@@ -60,7 +60,7 @@ class ControlledGoogle(GoogleClient):
             client_id='synthetic-client', client_secret='SECRET-client', scopes=list(scopes),
             expiry=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1))
 
-    def authorize(self, client_file: Path, expected_email: str) -> Credentials:
+    def authorize(self, client_file: Path, expected_email: str, *, scopes: tuple[str, ...] = SCOPES) -> Credentials:
         if self.authorization_error:
             raise RuntimeError('SECRET denied or cancelled')
         return self.credentials
@@ -399,3 +399,35 @@ def test_corrupt_state_has_actionable_reconnect_recovery(connection: tuple[Gmail
         service.connect(tmp_path / 'oauth.json', client.email)
     service.disconnect()
     assert 'Connected Gmail' in service.connect(tmp_path / 'oauth.json', client.email)
+
+
+def test_readonly_connection_can_upgrade_without_losing_previous_grant(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service, client, _ = connection
+    service.connect(tmp_path / 'oauth.json', client.email)
+    original = service.store.load()
+    assert original is not None
+    def authorize(client_file: Path, expected_email: str, *, scopes: tuple[str, ...]) -> Credentials:
+        assert scopes == (SCOPES[0], 'https://www.googleapis.com/auth/gmail.compose')
+        return Credentials('compose-token', refresh_token='compose-refresh', token_uri=TOKEN_URL,
+            client_id='test', client_secret='synthetic-secret', scopes=list(scopes), expiry=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1))
+    monkeypatch.setattr(client, 'authorize', authorize)
+    assert 'draft' in service.connect(tmp_path / 'oauth.json', client.email, compose=True).lower()
+    assert 'verified' in service.status()
+
+
+@pytest.mark.parametrize('failure', ['cancel', 'readonly', 'account'])
+def test_failed_draft_upgrade_preserves_reading(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain], tmp_path: Path, failure: str) -> None:
+    service, client, _ = connection
+    service.connect(tmp_path / 'oauth.json', client.email)
+    original = service.store.load()
+    assert original is not None
+    if failure == 'cancel':
+        client.authorization_error = True
+    elif failure == 'account':
+        client.credentials = client.token(scopes=(*SCOPES, 'https://www.googleapis.com/auth/gmail.compose'))
+        client.email = 'different@example.com'
+    with pytest.raises(GmailError):
+        service.connect(tmp_path / 'oauth.json', original.email, compose=True)
+    current = service.store.load()
+    assert current is not None
+    assert current.credentials.to_json() == original.credentials.to_json()

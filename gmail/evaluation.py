@@ -1,6 +1,7 @@
 """Real-model routing against synthetic Gmail HTTP; never reads the connected inbox."""
 from contextlib import nullcontext
 import base64
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -23,7 +24,7 @@ from pydantic_ai.settings import ModelSettings
 from core.tracing import tracing
 from core.turns import OwnerTurn
 from gmail.client import GoogleClient
-from gmail.constants import SCOPES, TOKEN_URL
+from gmail.constants import SCOPES, COMPOSE_SCOPES, TOKEN_URL
 from gmail.correspondence import Correspondence
 from gmail.credentials import Connection
 from gmail.mailbox import Mailbox
@@ -34,9 +35,9 @@ from subscriptions.service import SubscriptionService
 
 
 class SyntheticCredentials:
-    def __init__(self) -> None:
+    def __init__(self, drafts: bool = False) -> None:
         self.connection = Connection('fictional@example.invalid', Credentials('synthetic', refresh_token='synthetic',
-            token_uri=TOKEN_URL, client_id='fixture', scopes=list(SCOPES),
+            token_uri=TOKEN_URL, client_id='fixture', scopes=list(COMPOSE_SCOPES if drafts else SCOPES),
             expiry=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)))
     def load(self) -> Connection:
         return self.connection
@@ -64,11 +65,16 @@ class SyntheticModelRecorder(WrapperModel):
 
 
 class GmailExperiment:
-    def __init__(self) -> None:
+    def __init__(self, drafts: bool = False) -> None:
+        self.drafts = drafts
+        self.created: list[str] = []
         self.queries: list[str] = []
         self.licence = False
 
     def fixture(self, request: httpx2.Request) -> httpx2.Response:
+        if self.drafts and request.method == 'POST' and request.url.path.endswith('/drafts'):
+            self.created.append(base64.urlsafe_b64decode(json.loads(request.content)['message']['raw']).decode())
+            return httpx2.Response(200, json={'id': 'syntheticDraft'})
         if request.method != 'GET':
             raise AssertionError('Only reading is allowed')
         if request.url.path.endswith('/messages'):
@@ -77,7 +83,7 @@ class GmailExperiment:
                 return httpx2.Response(200, json={'messages': []})
             return httpx2.Response(200, json={'messages': [{'id': 'a1', 'threadId': 'b1'}]})
         message = {'id': 'a1', 'threadId': 'b1', 'snippet': 'Licence application decision' if self.licence else 'Lumen receipt for order ORDER-Q7', 'payload': {
-            'headers': [{'name': 'From', 'value': 'support@example.invalid'}, {'name': 'Subject', 'value': 'License application approved' if self.licence else 'Lumen order ORDER-Q7'}],
+            'headers': [{'name': 'Message-ID', 'value': '<synthetic@example.invalid>'}, {'name': 'From', 'value': 'support@example.invalid'}, {'name': 'Subject', 'value': 'License application approved' if self.licence else 'Lumen order ORDER-Q7'}],
             'mimeType': 'text/plain', 'body': {'data': base64.urlsafe_b64encode(b'License application approved.' if self.licence else b'Receipt for order ORDER-Q7. Amount paid INR 2400. Your refund request is under review; it has not been approved.').decode()}}}
         return httpx2.Response(200, json={'id': 'b1', 'messages': [message]} if '/threads/' in request.url.path else message)
 
@@ -95,21 +101,25 @@ class GmailExperiment:
         owner = 'gmail-evaluation-' + uuid4().hex
         answers: list[str] = []
         self.queries = []
+        self.created = []
         self.licence = item.input.get('topic') == 'licence'
         with TemporaryDirectory() as directory, httpx2.Client(transport=httpx2.MockTransport(self.fixture)) as http:
-            mail = Mailbox(GmailService(SyntheticCredentials(), SyntheticGoogle(), Path(directory)), http)
+            mail = Mailbox(GmailService(SyntheticCredentials(self.drafts), SyntheticGoogle(), Path(directory)), http)
             async with SubscriptionService(settings.SUBSCRIPTION_STATE_DIR).model() as raw_model:
                 model = SyntheticModelRecorder(raw_model)
                 model.records = []
                 app = ApplicationService(model, correspondence=Correspondence(lambda: nullcontext(mail), GmailQueryPlanner(model)))
                 requests = ['I agree to email processing', item.input['search']]
+                if self.drafts:
+                    requests.append('Draft a reply in Gmail asking what happens next.')
                 for index, request in enumerate(requests):
                     answers.append(await self.turn(app, owner, str(index), request))
-        return {'synthetic': True, 'answers': answers, 'queries': self.queries, 'model_steps': model.records,
+        return {'synthetic': True, 'answers': answers, 'queries': self.queries, 'model_steps': model.records, 'created_drafts': self.created,
             'checks': {'search_reached': bool(self.queries),
                 'bounded_queries': 1 <= len(self.queries) <= 3,
                 'natural_reply': bool(answers[-1]) and 'Select Gmail candidate' not in answers[-1],
-                'email_evidence_used': ('approv' in answers[-1].lower() if self.licence else '2400' in answers[-1].replace(',', ''))}}
+                'email_evidence_used': ('approv' in answers[1].lower() if self.licence else '2400' in answers[1].replace(',', '')),
+                'draft_created': not self.drafts or (len(self.created) == 1 and 'Nothing was sent' in answers[-1])}}
 
     @staticmethod
     def evaluate(*, output: dict[str, Any], **kwargs: Any) -> list[Evaluation]:
@@ -120,7 +130,7 @@ class GmailExperiment:
         client = Langfuse(public_key=settings.LANGFUSE_PUBLIC_KEY, secret_key=settings.LANGFUSE_SECRET_KEY,
                           base_url=settings.LANGFUSE_BASE_URL)
         try:
-            dataset = 'gmail-natural-journey-v1'
+            dataset = 'gmail-natural-drafts-v1' if self.drafts else 'gmail-natural-journey-v1'
             client.create_dataset(name=dataset, description='Synthetic mail only; no connected Gmail access.')
             for index, search in enumerate(('Help me get my Lumen refund.', 'I need help getting my money back from Lumen.', 'Help me with my licence approval.')):
                 client.create_dataset_item(dataset_name=dataset, id=f'{dataset}-{index}', input={'search': search, 'topic': 'licence' if index == 2 else 'order'},

@@ -52,7 +52,7 @@ class Correspondence:
 
     @sync_to_async
     def remember_goal(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                      question: str = '') -> None:
+                      question: str = '', recipient: str = '') -> None:
         with CaseMutation(turn, selection, current, operation='read') as mutation:
             if mutation.failure:
                 raise GmailError('Case changed')
@@ -60,6 +60,8 @@ class Correspondence:
             if not row.pending_goal:
                 row.pending_goal = turn.text
             row.pending_question = question
+            if recipient and recipient in turn.text:
+                row.pending_recipient = recipient
             row.save()
 
     async def run(self, turn: OwnerTurn, action: str, selection: SelectionView,
@@ -134,7 +136,7 @@ class Correspondence:
         return result
 
     async def assist(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                     usage: RunUsage, assistant: 'CaseAssistance') -> str:
+                     usage: RunUsage, assistant: 'CaseAssistance', *, draft: bool = False, recipient: str = '') -> str:
         try:
             row = await self._snapshot(turn, selection, current)
             goal = row.pending_goal or turn.text
@@ -153,6 +155,8 @@ class Correspondence:
                     found = await self._search(replace(turn, text=request), selection, current, usage, constants.ASSISTANCE_REQUEST_LIMIT)
                     await self._save_search(turn, selection, current, found)
                     row = await self._snapshot(turn, selection, current)
+                if not row.candidates and draft and recipient:
+                    return await assistant.draft(turn, selection, current, replace(row, pending_goal=goal), usage, recipient)
                 if not row.candidates:
                     question = 'I could not find a matching email. Do you know the sender or roughly when it arrived?'
                     await self.remember_goal(turn, selection, current, question)
@@ -173,6 +177,8 @@ class Correspondence:
                     span.set_attribute('gmail.truncated', result.truncated)
                 await self._save_selection(turn, selection, current, candidate.reference, candidate.thread_id, result)
                 row = await self._snapshot(turn, selection, current)
+            if draft:
+                return await assistant.draft(turn, selection, current, replace(row, pending_goal=goal), usage, recipient)
             answer = await assistant.explain(request, current,
                 [asdict(message) for message in row.messages], row.truncated, usage)
             await self._snapshot(turn, selection, current)
@@ -201,7 +207,7 @@ class Correspondence:
             row = CaseMailbox.objects.filter(case_id=current.id).first()
             return CorrespondenceSnapshot() if row is None else CorrespondenceSnapshot(row.mailbox,
                 [Candidate(**item) for item in row.candidates], row.selected_thread,
-                [ImportedMessage(**item) for item in row.messages], row.truncated, row.pending_goal, row.pending_question)
+                [ImportedMessage(**item) for item in row.messages], row.truncated, row.pending_goal, row.pending_question, row.pending_recipient)
 
     @sync_to_async
     def _save_search(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, result: MailResult[Candidate]) -> str:

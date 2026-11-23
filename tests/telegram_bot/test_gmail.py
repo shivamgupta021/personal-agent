@@ -1,3 +1,4 @@
+from email.parser import BytesParser
 from contextlib import nullcontext
 import asyncio
 import base64
@@ -16,6 +17,7 @@ from gmail.client import GoogleClient
 from gmail.constants import SCOPES, TOKEN_URL
 from gmail.credentials import Connection
 from gmail.service import GmailService
+from gmail.models import CaseMailbox
 from gmail.mailbox import Mailbox
 from gmail.planner import GmailQueryPlanner
 from gmail.correspondence import Correspondence
@@ -481,6 +483,148 @@ def test_natural_clarification_reuses_saved_email_choices(tmp_path: Path) -> Non
         assert 'does not confirm a refund' in answer
         assert harness.searches == 1
         assert harness.full_reads == 1
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+class DraftHarness(AssistanceHarness):
+    def __init__(self, directory: Path) -> None:
+        super().__init__(directory)
+        assert self.credentials.connection is not None
+        self.credentials.connection.credentials = Credentials('SECRET-access', refresh_token='SECRET-refresh',
+            token_uri=TOKEN_URL, client_id='test', scopes=[*SCOPES, 'https://www.googleapis.com/auth/gmail.compose'],
+            expiry=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1))
+        self.created: list[dict[str, Any]] = []
+        self.uncertain = False
+        self.ask_fact = False
+        self.recoverable = False
+        self.recovery_failure = False
+
+    def google(self, request: httpx2.Request) -> httpx2.Response:
+        if request.method == 'POST':
+            assert request.url.path.endswith('/drafts')
+            self.created.append(json.loads(request.content))
+            if self.uncertain:
+                raise httpx2.ReadTimeout('synthetic timeout')
+            return httpx2.Response(200, json={'id': 'draft123', 'message': {'id': 'm123'}})
+        if request.url.path.endswith('/drafts') and self.recovery_failure:
+            return httpx2.Response(503, json={})
+        if request.url.path.endswith('/drafts'):
+            return httpx2.Response(200, json={'drafts': [{'id': 'recoveredDraft'}] if self.recoverable else []})
+        if request.url.path.endswith('/drafts/recoveredDraft'):
+            mail = BytesParser().parsebytes(base64.urlsafe_b64decode(self.created[0]['message']['raw']))
+            return httpx2.Response(200, json={'message': {'payload': {'headers': [{'name': 'X-Personal-Agent-Export', 'value': str(mail['X-Personal-Agent-Export']).strip()}]}}})
+        response = super().google(request)
+        if '/threads/' in request.url.path and response.status_code == 200:
+            value = response.json()
+            value['messages'][0]['payload']['headers'].append({'name': 'Message-ID', 'value': '<reply@example.com>'})
+            return httpx2.Response(200, json=value)
+        return response
+
+    def model(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        properties = info.output_tools[0].parameters_json_schema.get('properties', {}) if info.output_tools else {}
+        if 'body' in properties and self.ask_fact:
+            self.ask_fact = False
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'subject': 'Refund', 'body': 'Pending', 'question': 'What remedy do you want?'})])
+        if 'body' in properties:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+                'subject': 'Refund request', 'body': 'Please confirm the status of my refund request.',
+                'sources': [{'message_id': 'abc1', 'quote': 'PRIVATE-BODY'}, {'message_id': 'abc1', 'quote': 'PRIVATE-SUBJECT'}]})])
+        if (self.text.startswith('Draft') or self.text == 'A refund to my bank account') and 'action' in properties:
+            part = messages[-1].parts[0]
+            assert isinstance(part, UserPromptPart)
+            payload = json.loads(str(part.content))
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': 'case_help',
+                'case_id': payload['selected_case']['id'], 'gmail_draft': True, 'intent_quote': self.text,
+                'gmail_recipient': 'manager@example.com' if 'manager@example.com' in self.text else ''})])
+        return super().model(messages, info)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('uncertain', [False, True])
+def test_draft_request_creates_only_unsent_gmail_draft_and_handles_uncertainty(tmp_path: Path, uncertain: bool) -> None:
+    harness = DraftHarness(tmp_path)
+    harness.uncertain = uncertain
+    async def run() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+        answer = await harness.send('Draft the reply in Gmail')
+        assert len(harness.created) == 1
+        encoded = harness.created[0]['message']
+        assert encoded['threadId'] == 'def1'
+        raw = base64.urlsafe_b64decode(encoded['raw']).decode()
+        assert 'To: help@example.com' in raw
+        assert 'In-Reply-To: <reply@example.com>' in raw
+        assert 'Please confirm the status' in raw
+        assert 'Please confirm the status' not in answer
+        if uncertain:
+            assert 'may have created' in answer
+            await harness.send('Draft the reply in Gmail')
+            assert len(harness.created) == 1
+        else:
+            assert 'Draft v1' in answer and 'Nothing was sent' in answer
+            await harness.send('Draft a firmer reply in Gmail')
+            assert len(harness.created) == 2  # New version, never overwrite the previous Gmail draft.
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_draft_clarification_preserves_recipient_and_clears_pending(tmp_path: Path) -> None:
+    harness = DraftHarness(tmp_path)
+    harness.ask_fact = True
+    async def run() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+        assert 'What remedy' in await harness.send('Draft a reply to manager@example.com')
+        assert not harness.created
+        answer = await harness.send('A refund to my bank account')
+        assert 'manager@example.com' in answer
+        raw = base64.urlsafe_b64decode(harness.created[0]['message']['raw']).decode()
+        assert 'To: manager@example.com' in raw
+        assert not await CaseMailbox.objects.exclude(pending_question='').aexists()
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_uncertain_draft_is_recovered_without_creating_another(tmp_path: Path) -> None:
+    harness = DraftHarness(tmp_path)
+    harness.uncertain = True
+    async def run() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+        await harness.send('Draft the reply in Gmail')
+        harness.recoverable = True
+        answer = await harness.send('Draft the reply in Gmail')
+        assert 'Draft v1' in answer
+        assert len(harness.created) == 1
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_failed_recovery_keeps_uncertain_draft_guard(tmp_path: Path) -> None:
+    harness = DraftHarness(tmp_path)
+    harness.uncertain = True
+    async def run() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+        await harness.send('Draft the reply in Gmail')
+        harness.recovery_failure = True
+        await harness.send('Draft the reply in Gmail')
+        harness.recovery_failure = False
+        answer = await harness.send('Draft the reply in Gmail')
+        assert 'unconfirmed' in answer
+        assert len(harness.created) == 1
     try:
         asyncio.run(run())
     finally:

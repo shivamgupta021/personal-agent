@@ -10,6 +10,7 @@ from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, Usage
 from pydantic_ai.models import Model
 
 from gmail.assistance import CaseAssistance
+from gmail.drafts import GmailDraftService
 from gmail.correspondence import Correspondence
 from gmail.factory import GmailFactory
 from gmail.planner import GmailQueryPlanner
@@ -70,7 +71,7 @@ class ApplicationService:
             return await self._run(replace(turn, text=pending), epoch) if pending else accepted
         if self.is_memory_control(turn.text):
             return await self.memory(turn)
-        replay = await self.store.replay(turn)
+        replay = await GmailDraftService.replay(turn) or await self.store.replay(turn)
         if replay:
             return replay
         intake = await self.intake.interpret(turn, epoch)

@@ -2,6 +2,35 @@
 
 A local Django project with a real research agent using your ChatGPT subscription, Pydantic AI, and your existing Firecrawl service. Django supplies application startup, settings, logging, and management commands. Owner-only Telegram, persistent conversation memory, preferences, and the refund-first grievance workflow use the same application services. External sending is not available.
 
+## Current checkpoint (23 November 2026)
+
+| Capability | Status |
+| --- | --- |
+| Telegram research with citations; persistent conversation, compaction, recall and explicit preferences | Implemented; regression coverage retained |
+| Grievance facts, reviewed public-policy research, local draft versions and manual progress | Implemented; legacy command-shaped administrative responses still exist |
+| Natural Gmail help: identify the case, plan searches, choose an unambiguous thread, refresh it and summarize evidence | Live Telegram checked; no candidate-reference commands needed |
+| Unsent Gmail drafts | Implemented and synthetic real-model experiment passed; live compose permission and one real draft acceptance still pending (#45) |
+| Revisions preserving manual Gmail edits | Not completed (#46); new drafts preserve previous Gmail copies, but application context cannot see manual edits yet |
+| Verified sent-state/reply checks, background monitoring, reminders | Not completed (#47–#49) |
+
+Test the user experience in the private Telegram bot, not with internal candidate IDs:
+
+1. **“Help me get my Hosteller refund.”** Expect an email-based summary, uncertainty where appropriate, and a short next step. It should find/select the case itself.
+2. **“What about my licence approval?”** Expect a switch to that case and its own correspondence, without mixing the two cases.
+3. **“Draft a reply in Gmail asking them what happens next.”** With compose permission, expect a recipient/version confirmation and Gmail mailbox/subject locator, not a full draft in Telegram. With read-only permission, expect an honest permission message and no draft.
+4. **“For this comparison, my two languages are Python and Ruby. Acknowledge without searching.”** Then **“Which two languages?”** Expect Python and Ruby, without forcing grievance handling.
+
+Real email traces deliberately show `{"omitted":"email privacy"}` while retaining stages and timing. To inspect readable content, use the synthetic Langfuse experiments. Neither fixture-based experiment accesses the real inbox:
+
+```sh
+uv run python manage.py evaluate_gmail
+uv run python manage.py evaluate_gmail --drafts
+```
+
+Both use the real subscription model with synthetic Gmail responses, publish a Langfuse experiment, and return its URL. Boolean checks verify the flow; inspect the synthetic answer and MIME draft for semantic quality too.
+
+Draft authorization is a one-time desktop setup: `uv run python manage.py gmail_connect --email YOUR_ADDRESS --compose`. Google’s compose scope includes sending permission; this app exposes only draft creation, never send. Failed authorization preserves the existing connection. Draft creation records intent first; uncertain outcomes are never blindly retried. A later request can recover a positively matched draft using its export marker, but an inconclusive bounded lookup remains unresolved and requires inspection.
+
 ## Run locally
 
 ```sh

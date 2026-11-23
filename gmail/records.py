@@ -22,6 +22,10 @@ class ImportedMessage:
     date: str
     text: str
     unread_attachments: bool
+    recipient: str = ''
+    reply_to: str = ''
+    rfc_message_id: str = ''
+    references: str = ''
 
 
 @dataclass(frozen=True)
@@ -40,3 +44,16 @@ class CorrespondenceSnapshot:
     truncated: bool = False
     pending_goal: str = ''
     pending_question: str = ''
+    pending_recipient: str = ''
+
+
+@dataclass(frozen=True)
+class DraftEnvelope:
+    mailbox: str
+    recipient: str
+    subject: str
+    body: str
+    thread_id: str = ''
+    reply_id: str = ''
+    references: str = ''
+    marker: str = ''

@@ -22,6 +22,8 @@ class IntakeAction(BaseModel):
     action: Literal['case_help', 'gmail_search', 'gmail_select', 'gmail_show', 'delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'conversation', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
     clarification_reason: Literal['unspecified', 'deleted_details'] = Field(default='unspecified',
         description='Use deleted_details only when the owner asks about retrieving details of a deleted case; this selects a fixed explanation, not a deletion action.')
+    gmail_draft: bool = False
+    gmail_recipient: str = Field(default='', max_length=320)
     gmail_reference: str = Field(default='', max_length=128)
     case_id: str = ''
     public_brief: 'PublicResearchBrief | None' = None

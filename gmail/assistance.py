@@ -10,6 +10,8 @@ from core.tracing import tracing
 from core.turns import OwnerTurn
 from gmail import constants
 from gmail.correspondence import Correspondence
+from gmail.drafts import GmailDraftService
+from gmail.records import CorrespondenceSnapshot
 from gmail.prompts import MAIL_BRIEF_INSTRUCTIONS, MAIL_MATCH_INSTRUCTIONS
 from grievances.schema import IntakeAction
 from grievances.store import CaseStore, CaseView, SelectionView
@@ -22,6 +24,7 @@ class MailMatch(BaseModel):
 
 class CaseAssistance:
     def __init__(self, model: Model, store: CaseStore, correspondence: Correspondence) -> None:
+        self.model = model
         self.store = store
         self.correspondence = correspondence
         self.matcher = Agent(model, name='gmail_thread_matcher', output_type=MailMatch,
@@ -62,7 +65,18 @@ class CaseAssistance:
         if not await self.correspondence.consented(turn.owner_id):
             await self.correspondence.remember_goal(turn, selection, current)
             return await self.correspondence.run(turn, 'gmail_search', selection, current)
-        return await self.correspondence.assist(turn, selection, current, usage, self)
+        return await self.correspondence.assist(turn, selection, current, usage, self,
+            draft=action.gmail_draft, recipient=action.gmail_recipient)
+
+    async def draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
+                    row: CorrespondenceSnapshot, usage: RunUsage, recipient: str) -> str:
+        if self.correspondence.mailbox is None:
+            return 'Gmail is unavailable. Please check the connection.'
+        answer = await GmailDraftService(self.model, self.correspondence.mailbox).run(
+            turn, selection, current, row, usage, recipient)
+        if answer.rstrip().endswith('?'):
+            await self.correspondence.remember_goal(turn, selection, current, answer, recipient)
+        return answer
 
     async def match(self, request: str, case: CaseView, candidates: list[dict[str, str]],
                     usage: RunUsage) -> MailMatch:

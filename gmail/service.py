@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from google.oauth2.credentials import Credentials
 
 from gmail.client import GoogleClient
-from gmail.constants import SCOPES, TOKEN_URL
+from gmail.constants import SCOPES, COMPOSE_SCOPES, COMPOSE_SCOPE, TOKEN_URL
 from gmail.credentials import Connection, CredentialStore
 from gmail.errors import GmailError
 
@@ -40,14 +40,16 @@ class GmailService:
                 os.close(descriptor)
 
     @staticmethod
-    def validate(credentials: Credentials) -> None:
+    def validate(credentials: Credentials, *, require_compose: bool = False) -> None:
         scopes = credentials.granted_scopes if credentials.granted_scopes is not None else credentials.scopes
-        if set(scopes or ()) != set(SCOPES):
-            raise GmailError('Gmail requires exactly the read-only grant for this milestone. Review this app in your Google account and reconnect.')
+        if set(scopes or ()) not in (set(SCOPES), set(COMPOSE_SCOPES)):
+            raise GmailError('Gmail grant is incomplete or broader than supported. Reconnect with the requested permissions.')
+        if require_compose and COMPOSE_SCOPE not in (scopes or ()):
+            raise GmailError('Gmail is connected for reading only. Enable draft creation through Google consent; your current reading connection is preserved.')
         if not credentials.refresh_token or credentials.token_uri != TOKEN_URL:
             raise GmailError('Gmail offline credentials are missing or invalid. Reconnect Gmail.')
 
-    def connect(self, client_file: Path, expected_email: str, *, replace_account: bool = False) -> str:
+    def connect(self, client_file: Path, expected_email: str, *, replace_account: bool = False, compose: bool = False) -> str:
         with self.operation():
             if '@' not in expected_email or any(c.isspace() for c in expected_email):
                 raise GmailError('Provide the expected Gmail address using --email.')
@@ -57,13 +59,16 @@ class GmailService:
                 raise GmailError('Existing Gmail credentials could not be read. Unlock Keychain and retry, or run gmail_disconnect before reconnecting.') from None
             if previous and previous.email.casefold() != expected_email.casefold() and not replace_account:
                 raise GmailError('A different mailbox is connected. Use --replace-account to change it explicitly.')
-            credentials = self.client.authorize(client_file, expected_email)
-            self.validate(credentials)
+            credentials = self.client.authorize(client_file, expected_email, scopes=COMPOSE_SCOPES) if compose else self.client.authorize(client_file, expected_email)
+            self.validate(credentials, require_compose=compose)
+            granted = credentials.granted_scopes if credentials.granted_scopes is not None else credentials.scopes
+            if not compose and set(granted or ()) != set(SCOPES):
+                raise GmailError('Unexpected Gmail permissions; the previous connection was preserved. Request draft permission explicitly.')
             actual_email = self.client.profile(credentials)
             if actual_email.casefold() != expected_email.casefold():
                 raise GmailError('The selected Google account does not match --email. The previous connection was preserved.')
             self.store.save(Connection(actual_email, credentials))
-            return f'Connected Gmail: {actual_email}. Read-only access; no messages were fetched.'
+            return f'Connected Gmail: {actual_email}. ' + ('Reading and draft creation enabled; nothing sent.' if compose else 'Read-only access; no messages were fetched.')
 
     @contextmanager
     def connected(self) -> Iterator[Connection]:
@@ -87,7 +92,9 @@ class GmailService:
             if self.store.load() is None:
                 return 'Gmail is not connected.'
         with self.connected() as connection:
-            return f'Gmail connected: {connection.email}. Read-only access verified; no messages were fetched.'
+            scopes = connection.credentials.granted_scopes or connection.credentials.scopes or ()
+            capability = 'Reading and draft creation' if COMPOSE_SCOPE in scopes else 'Read-only access'
+            return f'Gmail connected: {connection.email}. {capability} verified; no messages were fetched.'
 
     def disconnect(self) -> str:
         with self.operation():

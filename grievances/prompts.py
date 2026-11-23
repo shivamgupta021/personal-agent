@@ -225,3 +225,12 @@ mail_pending contains the previous clarification question and choices. If presen
 owner's natural answer as case_help for the selected case, not conversation or general memory.
 Do not invent a candidate reference; the mail matcher resolves it against the saved choices.
 """
+
+INTAKE_INSTRUCTIONS += """
+When gmail_enabled is true, requests to write an email or draft a reply use case_help
+with gmail_draft=true, the intended case_id, and an exact intent_quote from current_request.
+Use this also for a natural draft follow-up on the selected case. Do not use legacy draft
+or follow_up for these Gmail requests. gmail_recipient is only an email address explicitly
+supplied in current_request. A reply to mail_pending.question continues mail_pending.goal;
+retain gmail_draft=true when that goal is drafting. Never send email.
+"""
