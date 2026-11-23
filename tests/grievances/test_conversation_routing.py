@@ -1,6 +1,7 @@
 """Conversation regressions through the same application boundary used by Telegram."""
 
 import asyncio
+import json
 
 import pytest
 from django.test import override_settings
@@ -65,7 +66,8 @@ def test_ordinary_conversation_survives_restart_without_case_or_web_access(selec
 
 
 @pytest.mark.django_db(transaction=True)
-def test_application_trace_groups_route_and_conversation_without_private_content() -> None:
+@pytest.mark.parametrize('capture,private_capture', [(False, False), (False, True), (True, False), (True, True)])
+def test_application_trace_content_respects_both_capture_settings(capture: bool, private_capture: bool) -> None:
     exporter = InMemorySpanExporter()
     secret = 'SYNTHETIC-CONVERSATION-MARKER'
 
@@ -76,7 +78,7 @@ def test_application_trace_groups_route_and_conversation_without_private_content
 
     tracing.shutdown()
     try:
-        with override_settings(LANGFUSE_CAPTURE_CONTENT=True):
+        with override_settings(LANGFUSE_CAPTURE_CONTENT=capture, LANGFUSE_CAPTURE_PRIVATE_CONTENT=private_capture):
             tracing.configure(exporter)
             app = ApplicationService(FunctionModel(respond))
             answer = asyncio.run(app.run(OwnerTurn('owner', 'owner', 'one', secret)))
@@ -87,6 +89,15 @@ def test_application_trace_groups_route_and_conversation_without_private_content
             assert len(roots) == 1 and roots[0].name == 'application.turn'
             assert len({span.context.trace_id for span in spans if span.context}) == 1
             assert any(span.attributes and span.attributes.get('application.route') == 'conversation' for span in spans)
-            assert secret not in '\n'.join(span.to_json() for span in spans)
+            assert (secret in '\n'.join(span.to_json() for span in spans)) == (capture and private_capture)
+            if capture and private_capture:
+                attributes = roots[0].attributes or {}
+                input_value = attributes['langfuse.observation.input']
+                output_value = attributes['langfuse.observation.output']
+                assert isinstance(input_value, str) and isinstance(output_value, str)
+                assert json.loads(input_value) == {'message': secret}
+                assert json.loads(output_value) == {'answer': secret}
+                for span in spans:
+                    assert secret in span.to_json(), span.name
     finally:
         tracing.shutdown()

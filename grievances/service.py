@@ -53,9 +53,11 @@ class ApplicationService:
         return (await self.deletion.delete(turn, case_id)).message
 
     async def prepare(self, turn: OwnerTurn) -> PreparedReply:
-        with tracing.operation('application.turn', {}, kind='agent', private=True) as span:
+        with tracing.operation('application.turn', {'message': turn.text}, kind='agent', private=True) as span:
             span.set_attribute('langfuse.session.id', turn.owner_id)
-            return await self._prepare(turn)
+            reply = await self._prepare(turn)
+            tracing.record_output(span, {'answer': await reply.render()})
+            return reply
 
     async def _prepare(self, turn: OwnerTurn) -> PreparedReply:
         epoch = await CaseOwnership().begin(turn)
@@ -109,10 +111,11 @@ class ApplicationService:
         if len(encoded) > constants.MAX_CONTEXT_CHARS:
             return 'This case directory exceeds the intake context limit. Nothing changed.'
         usage = RunUsage()
-        with tracing.operation('case.intake', {}, kind='agent', private=True) as span:
+        with tracing.operation('case.intake', payload, kind='agent', private=True) as span:
             result = await self.agent.run(encoded, usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                                           timeout=constants.RUN_TIMEOUT_SECONDS)
             span.set_attribute('application.route', result.output.action)
+            tracing.record_output(span, result.output.model_dump(mode='json'))
         action = result.output
         if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up') and current:
             messages: list[str] = []
@@ -226,8 +229,10 @@ class ApplicationService:
         return control in DELETE_CONVERSATION_PHRASES or control == 'retry trace cleanup'
 
     async def memory(self, turn: OwnerTurn) -> str:
-        with tracing.operation('application.memory', {}, kind='agent', private=True):
-            return await ConversationService(turn.owner_id, ConversationMemoryRunner(self.model)).run(turn.text)
+        with tracing.operation('application.memory', {'message': turn.text}, kind='agent', private=True) as span:
+            answer = await ConversationService(turn.owner_id, ConversationMemoryRunner(self.model)).run(turn.text)
+            tracing.record_output(span, {'answer': answer})
+            return answer
 
 
 class PublicResearchRequested(Exception):

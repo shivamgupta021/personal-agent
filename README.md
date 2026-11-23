@@ -382,7 +382,7 @@ Cases, messages, fact revisions and selection survive restart. Duplicate Telegra
 IDs cannot repeat saved case actions. Reusing a case label does not silently create another
 case or overwrite its facts. This intake milestone does not send complaints or resolve cases.
 
-Private case agent spans omit content even when public research content capture is enabled.
+Private case agent spans omit content unless both `LANGFUSE_CAPTURE_CONTENT=true` and `LANGFUSE_CAPTURE_PRIVATE_CONTENT=true` are enabled.
 Use the native synthetic intake experiment to inspect extracted proposals and saved facts:
 
 ```sh
@@ -590,9 +590,12 @@ Its local record is `supplementary-final.json` in the same evidence bundle.
 - Company-source quotations are evidence for review, not a guarantee of refund eligibility.
   Missing purchase-time terms and conflicting policies remain uncertain. Some low-value
   site navigation/status text can still appear in research notes.
-- Private case traces retain timing, usage, message structure and tool schemas, but omit raw
-  case text even when public-research content capture is enabled. Empty private previews
-  therefore do not mean the case tools returned empty results.
+- Private conversation/case traces omit payloads by default. For local debugging, enable
+  both `LANGFUSE_CAPTURE_CONTENT=true` and `LANGFUSE_CAPTURE_PRIVATE_CONTENT=true`
+  in `.env`, then restart the bot. This stores conversation history, saved preferences,
+  case context and generated text in the configured Langfuse instance. The application
+  root shows the current message and prepared reply; model spans show their actual context.
+  Old traces cannot recover content that was never recorded.
 - This assistant prepares drafts and records your reports. It does not send complaints,
   contact a company, attach documents, book anything or make payments.
 

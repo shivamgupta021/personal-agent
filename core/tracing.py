@@ -55,9 +55,18 @@ class Tracing:
                     'enabled' if settings.LANGFUSE_CAPTURE_CONTENT else 'disabled')
 
     def private_instrumentation(self) -> InstrumentationSettings:
-        """Per-agent privacy policy independent of public debugging configuration."""
+        """Private payloads require both explicit debugging opt-ins."""
         return InstrumentationSettings(tracer_provider=self._provider or NoOpTracerProvider(),
-            include_content=False, include_binary_content=False, include_model_request_parameters=False)
+            include_content=self.capture_private_content(), include_binary_content=False, include_model_request_parameters=False)
+
+    @staticmethod
+    def capture_private_content() -> bool:
+        return bool(settings.LANGFUSE_CAPTURE_CONTENT and settings.LANGFUSE_CAPTURE_PRIVATE_CONTENT)
+
+    @staticmethod
+    def capture_content() -> bool:
+        return settings.LANGFUSE_CAPTURE_CONTENT and (
+            not _private_content.get() or settings.LANGFUSE_CAPTURE_PRIVATE_CONTENT)
 
     @contextmanager
     def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever', private: bool = False) -> Iterator[Span]:
@@ -67,7 +76,7 @@ class Tracing:
             attributes={'langfuse.observation.type': kind},
         ) as span:
             token = _private_content.set(private or _private_content.get())
-            if settings.LANGFUSE_CAPTURE_CONTENT and not _private_content.get():
+            if self.capture_content():
                 span.set_attribute('langfuse.observation.input', json.dumps(inputs))
             try:
                 yield span
@@ -78,7 +87,7 @@ class Tracing:
                 _private_content.reset(token)
 
     def record_output(self, span: Span, output: dict[str, Any]) -> None:
-        if settings.LANGFUSE_CAPTURE_CONTENT and not _private_content.get():
+        if self.capture_content():
             span.set_attribute('langfuse.observation.output', json.dumps(output))
         if 'error' in output:
             span.set_status(StatusCode.ERROR)
