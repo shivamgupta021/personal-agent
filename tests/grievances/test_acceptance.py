@@ -13,7 +13,7 @@ from core.turns import OwnerTurn
 from telegram_bot.client import TelegramClient, TelegramError
 from telegram_bot.service import TelegramService
 from telegram_bot.state import PollingState
-from test_progress import FACTS, ProgressConversation
+from tests.grievances.test_progress import FACTS, ProgressConversation
 from grievances.acceptance_evidence import AcceptanceFingerprint, DeterministicEvidence
 from grievances.acceptance_catalog import CASES, LIVE_CHECKS, REQUIRED_CHECKS, REVIEW_CRITERIA
 

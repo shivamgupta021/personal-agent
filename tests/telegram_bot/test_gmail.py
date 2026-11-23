@@ -508,14 +508,14 @@ class DraftHarness(AssistanceHarness):
             self.created.append(json.loads(request.content))
             if self.uncertain:
                 raise httpx2.ReadTimeout('synthetic timeout')
-            return httpx2.Response(200, json={'id': 'draft123', 'message': {'id': 'm123'}})
+            return httpx2.Response(200, json={'id': 'draft123', 'message': {'id': 'abc123'}})
         if request.url.path.endswith('/drafts') and self.recovery_failure:
             return httpx2.Response(503, json={})
         if request.url.path.endswith('/drafts'):
             return httpx2.Response(200, json={'drafts': [{'id': 'recoveredDraft'}] if self.recoverable else []})
         if request.url.path.endswith('/drafts/recoveredDraft'):
             mail = BytesParser().parsebytes(base64.urlsafe_b64decode(self.created[0]['message']['raw']))
-            return httpx2.Response(200, json={'message': {'payload': {'headers': [{'name': 'X-Personal-Agent-Export', 'value': str(mail['X-Personal-Agent-Export']).strip()}]}}})
+            return httpx2.Response(200, json={'id': 'recoveredDraft', 'message': {'id': 'abc123', 'payload': {'headers': [{'name': 'X-Personal-Agent-Export', 'value': str(mail['X-Personal-Agent-Export']).strip()}]}}})
         response = super().google(request)
         if '/threads/' in request.url.path and response.status_code == 200:
             value = response.json()
@@ -565,6 +565,7 @@ def test_draft_request_creates_only_unsent_gmail_draft_and_handles_uncertainty(t
             assert len(harness.created) == 1
         else:
             assert 'Draft v1' in answer and 'Nothing was sent' in answer
+            assert 'https://mail.google.com/mail/?authuser=owner%40example.com#inbox?compose=abc123' in answer
             await harness.send('Draft a firmer reply in Gmail')
             assert len(harness.created) == 2  # New version, never overwrite the previous Gmail draft.
     try:

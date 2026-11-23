@@ -136,7 +136,8 @@ class Correspondence:
         return result
 
     async def assist(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                     usage: RunUsage, assistant: 'CaseAssistance', *, draft: bool = False, recipient: str = '') -> str:
+                     usage: RunUsage, assistant: 'CaseAssistance', *, draft: bool = False, recipient: str = '',
+                     revision: bool = False, version: int | None = None) -> str:
         try:
             row = await self._snapshot(turn, selection, current)
             goal = row.pending_goal or turn.text
@@ -156,7 +157,7 @@ class Correspondence:
                     await self._save_search(turn, selection, current, found)
                     row = await self._snapshot(turn, selection, current)
                 if not row.candidates and draft and recipient:
-                    return await assistant.draft(turn, selection, current, replace(row, pending_goal=goal), usage, recipient)
+                    return await assistant.draft(turn, selection, current, replace(row, pending_goal=goal), usage, recipient, revision=revision, version=version)
                 if not row.candidates:
                     question = 'I could not find a matching email. Do you know the sender or roughly when it arrived?'
                     await self.remember_goal(turn, selection, current, question)
@@ -178,7 +179,7 @@ class Correspondence:
                 await self._save_selection(turn, selection, current, candidate.reference, candidate.thread_id, result)
                 row = await self._snapshot(turn, selection, current)
             if draft:
-                return await assistant.draft(turn, selection, current, replace(row, pending_goal=goal), usage, recipient)
+                return await assistant.draft(turn, selection, current, replace(row, pending_goal=goal), usage, recipient, revision=revision, version=version)
             answer = await assistant.explain(request, current,
                 [asdict(message) for message in row.messages], row.truncated, usage)
             await self._snapshot(turn, selection, current)

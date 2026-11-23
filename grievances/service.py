@@ -14,6 +14,7 @@ from gmail.drafts import GmailDraftService
 from gmail.correspondence import Correspondence
 from gmail.factory import GmailFactory
 from gmail.planner import GmailQueryPlanner
+from gmail.reply_checks import GmailReplyChecks
 from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn, PreparedReply
 from grievances.ownership import CaseOwnership
@@ -82,6 +83,18 @@ class ApplicationService:
         if action.action == 'case_help':
             return await CaseAssistance(self.model, self.store, self.correspondence).run(
                 turn, action, selection, current, usage)
+        if action.action == 'gmail_open_draft':
+            if current is None or self.correspondence.mailbox is None:
+                return 'Which case’s Gmail draft should I open?'
+            return await GmailDraftService(self.model, self.correspondence.mailbox).open(
+                turn, selection, current, action.draft_version)
+        if action.action == 'gmail_check_replies':
+            if current is None:
+                return 'Which case should I check for replies?'
+            if self.correspondence.mailbox is None:
+                return 'Gmail access is unavailable in this session. Check the Gmail connection.'
+            return await GmailReplyChecks(self.model, self.correspondence.mailbox).run(
+                turn, selection, current, usage)
         if action.action.startswith('gmail_'):
             return await self.correspondence.run(turn, action.action, selection, current,
                 action.gmail_reference, usage, constants.MAX_MODEL_REQUESTS)

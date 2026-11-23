@@ -65,13 +65,21 @@ class SyntheticModelRecorder(WrapperModel):
 
 
 class GmailExperiment:
-    def __init__(self, drafts: bool = False) -> None:
-        self.drafts = drafts
+    def __init__(self, drafts: bool = False, revisions: bool = False) -> None:
+        self.revisions = revisions
+        self.drafts = drafts or revisions
         self.created: list[str] = []
         self.queries: list[str] = []
         self.licence = False
 
     def fixture(self, request: httpx2.Request) -> httpx2.Response:
+        if self.revisions and request.url.path.endswith('/drafts/syntheticDraft'):
+            return httpx2.Response(200, json={'id': 'syntheticDraft', 'message': {'id': 'draftMessage',
+                'threadId': 'b1', 'labelIds': ['DRAFT'], 'payload': {'mimeType': 'text/plain',
+                    'headers': [{'name': 'To', 'value': 'support@example.invalid'},
+                        {'name': 'Subject', 'value': 'Lumen order ORDER-Q7'},
+                        {'name': 'In-Reply-To', 'value': '<synthetic@example.invalid>'}],
+                    'body': {'data': base64.urlsafe_b64encode(b'Please review my refund of INR 2400. My manually added reference is HUMAN-Q7. I prefer a written response.').decode()}}}})
         if self.drafts and request.method == 'POST' and request.url.path.endswith('/drafts'):
             self.created.append(base64.urlsafe_b64decode(json.loads(request.content)['message']['raw']).decode())
             return httpx2.Response(200, json={'id': 'syntheticDraft'})
@@ -112,6 +120,8 @@ class GmailExperiment:
                 requests = ['I agree to email processing', item.input['search']]
                 if self.drafts:
                     requests.append('Draft a reply in Gmail asking what happens next.')
+                if self.revisions:
+                    requests.append('Revise Gmail draft v1 to ask for a response within a week, preserving my manual edits.')
                 for index, request in enumerate(requests):
                     answers.append(await self.turn(app, owner, str(index), request))
         return {'synthetic': True, 'answers': answers, 'queries': self.queries, 'model_steps': model.records, 'created_drafts': self.created,
@@ -119,7 +129,8 @@ class GmailExperiment:
                 'bounded_queries': 1 <= len(self.queries) <= 3,
                 'natural_reply': bool(answers[-1]) and 'Select Gmail candidate' not in answers[-1],
                 'email_evidence_used': ('approv' in answers[1].lower() if self.licence else '2400' in answers[1].replace(',', '')),
-                'draft_created': not self.drafts or (len(self.created) == 1 and 'Nothing was sent' in answers[-1])}}
+                'draft_created': not self.drafts or (len(self.created) == (2 if self.revisions else 1) and 'Nothing was sent' in answers[-1]),
+                'revision_manual_edits': not self.revisions or (len(self.created) == 2 and 'HUMAN-Q7' in self.created[-1] and 'written' in self.created[-1].lower())}}
 
     @staticmethod
     def evaluate(*, output: dict[str, Any], **kwargs: Any) -> list[Evaluation]:
@@ -130,10 +141,12 @@ class GmailExperiment:
         client = Langfuse(public_key=settings.LANGFUSE_PUBLIC_KEY, secret_key=settings.LANGFUSE_SECRET_KEY,
                           base_url=settings.LANGFUSE_BASE_URL)
         try:
-            dataset = 'gmail-natural-drafts-v1' if self.drafts else 'gmail-natural-journey-v1'
+            dataset = 'gmail-natural-revisions-v1' if self.revisions else 'gmail-natural-drafts-v1' if self.drafts else 'gmail-natural-journey-v1'
             client.create_dataset(name=dataset, description='Synthetic mail only; no connected Gmail access.')
-            for index, search in enumerate(('Help me get my Lumen refund.', 'I need help getting my money back from Lumen.', 'Help me with my licence approval.')):
-                client.create_dataset_item(dataset_name=dataset, id=f'{dataset}-{index}', input={'search': search, 'topic': 'licence' if index == 2 else 'order'},
+            searches = ('Help me get my Lumen refund.', 'I need help getting my money back from Lumen.',
+                'Help me with my Lumen refund.' if self.revisions else 'Help me with my licence approval.')
+            for index, search in enumerate(searches):
+                client.create_dataset_item(dataset_name=dataset, id=f'{dataset}-{index}', input={'search': search, 'topic': 'licence' if index == 2 and not self.revisions else 'order'},
                     expected_output={'search': True, 'attribution': True})
             result = client.get_dataset(dataset).run_experiment(name='gmail-correspondence', task=self.task,
                 evaluators=[self.evaluate], max_concurrency=1)

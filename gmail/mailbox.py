@@ -12,7 +12,7 @@ import httpx2
 from gmail import constants
 from gmail.errors import GmailError, DraftOutcomeUnknown
 from gmail.service import GmailService
-from gmail.records import Candidate, ImportedMessage, MailResult, DraftEnvelope
+from gmail.records import Candidate, ImportedMessage, MailResult, DraftEnvelope, DraftReference
 
 
 class Mailbox:
@@ -63,8 +63,9 @@ class Mailbox:
             data = self._get('/threads/' + self._identifier(thread_id), str(connection.credentials.token), {'format': 'full'})
             items: list[ImportedMessage] = []
             remaining = constants.MAX_TEXT_CHARS
-            truncated = len(data.get('messages', [])) > constants.MAX_MESSAGES
-            for message in reversed(data.get('messages', [])[-constants.MAX_MESSAGES:]):
+            correspondence = [message for message in data.get('messages', []) if 'DRAFT' not in message.get('labelIds', [])]
+            truncated = len(correspondence) > constants.MAX_MESSAGES
+            for message in reversed(correspondence[-constants.MAX_MESSAGES:]):
                 payload = message.get('payload', {})
                 headers = self._headers(payload)
                 text, attachments, clipped = self._text(payload)
@@ -74,11 +75,16 @@ class Mailbox:
                     sender=headers.get('from', '')[:constants.MAX_PREVIEW_CHARS],
                     subject=headers.get('subject', '')[:constants.MAX_PREVIEW_CHARS],
                     date=headers.get('date', '')[:constants.MAX_PREVIEW_CHARS],
-                    text=text[:allowance], unread_attachments=attachments, recipient=headers.get('to', '')[:1000],
+                    text=text[:allowance], unread_attachments=attachments, labels=tuple(message.get('labelIds', [])), recipient=headers.get('to', '')[:1000],
                     reply_to=headers.get('reply-to', '')[:1000], rfc_message_id=headers.get('message-id', '')[:1000],
                     references=headers.get('references', '')[:4000]))
                 remaining = max(0, remaining - min(len(text), allowance))
             return MailResult(connection.email, list(reversed(items)), truncated)
+
+    def verify_account(self, mailbox: str) -> None:
+        with self.connection.connected() as connection:
+            if connection.email.casefold() != mailbox.casefold():
+                raise GmailError('The connected Gmail account changed. Please check the connection.')
 
     def draft_capability(self, mailbox: str) -> None:
         with self.connection.connected() as connection:
@@ -86,7 +92,37 @@ class Mailbox:
                 raise GmailError('The connected Gmail account changed. Please check the account before creating a draft.')
             self.connection.validate(connection.credentials, require_compose=True)
 
-    def create_draft(self, draft: DraftEnvelope) -> str:
+    def draft_reference(self, draft_id: str, mailbox: str) -> DraftReference:
+        with self.connection.connected() as connection:
+            if connection.email.casefold() != mailbox.casefold():
+                raise GmailError('The Gmail account changed. Please check the connection before opening this draft.')
+            data = self._get('/drafts/' + self._identifier(draft_id), str(connection.credentials.token), {'format': 'minimal'})
+            if 'DRAFT' not in data.get('message', {}).get('labelIds', []):
+                raise GmailError('I could not verify that this is still an unsent draft. Check Gmail Drafts directly.')
+            return self._draft_reference(data)
+
+    def read_draft(self, draft_id: str, mailbox: str) -> DraftEnvelope:
+        """Read the complete editable text, never a truncated correspondence excerpt."""
+        with self.connection.connected() as connection:
+            if connection.email.casefold() != mailbox.casefold():
+                raise GmailError('The Gmail account changed; no revision was created.')
+            data = self._get('/drafts/' + self._identifier(draft_id), str(connection.credentials.token), {'format': 'full'})
+            message = data.get('message', {})
+            if 'DRAFT' not in message.get('labelIds', []):
+                raise GmailError('That email is no longer an unsent draft. No revision was created.')
+            payload = message.get('payload', {})
+            headers = self._headers(payload)
+            body, attachments, clipped = self._text(payload)
+            if (attachments or clipped or len(body) > constants.DRAFT_MAX_BODY_CHARS or
+                    body.startswith('[No readable plain text') or body == '[Unreadable text]' or
+                    headers.get('cc') or headers.get('bcc')):
+                raise GmailError('I cannot preserve all content or recipients of this Gmail draft safely. Please simplify it to a plain-text draft without attachments, Cc or Bcc before requesting a revision.')
+            if len(headers.get('subject', '')) > constants.DRAFT_MAX_SUBJECT_CHARS:
+                raise GmailError('The Gmail draft subject is too long to preserve safely.')
+            return DraftEnvelope(mailbox, headers.get('to', ''), headers.get('subject', ''), body,
+                str(message.get('threadId', '')), headers.get('in-reply-to', ''), headers.get('references', ''))
+
+    def create_draft(self, draft: DraftEnvelope) -> DraftReference:
         with self.connection.connected() as connection:
             self.connection.validate(connection.credentials, require_compose=True)
             if connection.email.casefold() != draft.mailbox.casefold():
@@ -115,11 +151,11 @@ class Mailbox:
             if response.status_code not in (200, 201):
                 raise GmailError('Google rejected draft creation. Check draft permission; nothing was sent.')
             try:
-                return self._identifier(response.json().get('id'))
+                return self._draft_reference(response.json())
             except (ValueError, TypeError, GmailError):
                 raise DraftOutcomeUnknown('Google returned an unclear creation result. Check Gmail Drafts before retrying.') from None
 
-    def find_export(self, mailbox: str, marker: str) -> str | None:
+    def find_export(self, mailbox: str, marker: str) -> DraftReference | None:
         """Recover only a positively matched draft; absence never authorizes retry."""
         with self.connection.connected() as connection:
             if connection.email.casefold() != mailbox.casefold():
@@ -132,7 +168,7 @@ class Mailbox:
                 draft = self._get('/drafts/' + identifier, token, {'format': 'full'})
                 headers = self._headers(draft.get('message', {}).get('payload', {}))
                 if headers.get(constants.DRAFT_MARKER_HEADER.lower(), '').strip() == marker:
-                    matches.append(identifier)
+                    matches.append(self._draft_reference(draft))
             return matches[0] if len(matches) == 1 else None
 
     @staticmethod
@@ -140,6 +176,17 @@ class Mailbox:
         if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', value):
             raise GmailError('Gmail returned an invalid message reference.')
         return value
+
+    @classmethod
+    def _draft_reference(cls, data: dict[str, Any]) -> DraftReference:
+        draft_id = cls._identifier(data.get('id'))
+        message = data.get('message')
+        message_id = message.get('id', '') if isinstance(message, dict) else ''
+        # Link metadata is optional: a missing message ID must not turn a successful
+        # creation into a retry that could create a duplicate draft.
+        if not isinstance(message_id, str) or not re.fullmatch(r'[0-9a-fA-F]{1,128}', message_id):
+            message_id = ''
+        return DraftReference(draft_id, message_id)
 
     @staticmethod
     def _headers(payload: dict[str, Any]) -> dict[str, str]:
