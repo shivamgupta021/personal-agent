@@ -80,9 +80,8 @@ class Correspondence:
                             if candidate.thread_id not in seen:
                                 seen.add(candidate.thread_id)
                                 items.append(candidate)
-                        if len(items) >= constants.MAX_CANDIDATES:
-                            truncated |= len(items) > constants.MAX_CANDIDATES or query != plan.queries[-1]
-                            break
+                        if items:
+                            break  # Broader alternatives are only for an empty preceding search.
                 result = MailResult(account, items[:constants.MAX_CANDIDATES], truncated)
                 return await self._save_search(turn, selection, current, result)
             if action == 'gmail_select':

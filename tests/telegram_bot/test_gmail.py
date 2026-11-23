@@ -358,3 +358,19 @@ def test_planner_broadening_preserves_explicit_gmail_filters(tmp_path: Path) -> 
         asyncio.run(run())
     finally:
         harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_gmail_stops_before_broader_fallback_after_candidates_found(tmp_path: Path) -> None:
+    harness = MailHarness(tmp_path)
+    harness.plan_queries = ['"Kettle"', 'Kettle refund', 'Kettle order']
+    async def run() -> None:
+        await harness.send('Create case Kettle')
+        await harness.send('I agree to email processing')
+        answer = await harness.send('Search Gmail for this case')
+        assert 'Gmail candidates' in answer
+        assert harness.searches == 1
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()

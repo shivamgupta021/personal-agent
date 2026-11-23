@@ -672,7 +672,7 @@ With Gmail connected, use the private Telegram chat:
    the configured model provider in case workflows; execution is not local-only.
 3. Ask **Search Gmail for this case**. Optional Gmail constraints can be stated in
    the same request. The planner generates up to three related Gmail API queries, then the app shows at most
-   five candidate threads across bounded searches. Full messages are not read during planning.
+   five candidate threads. Broader alternatives run only when the preceding search is empty. Full messages are not read during planning.
 4. Say **Select Gmail candidate REFERENCE**, using the displayed reference. Only
    then is the full thread requested. Imported plain text is bounded; attachments,
    remote images and HTML are not read. Truncation is reported.

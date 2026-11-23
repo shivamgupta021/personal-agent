@@ -95,7 +95,7 @@ class GmailExperiment:
                     answers.append(await self.turn(app, owner, 'show', 'Show the selected Gmail correspondence and its source references.'))
         return {'synthetic': True, 'answers': answers, 'queries': self.queries,
             'checks': {'search_reached': bool(self.queries),
-                'case_query': (any('licen' in query.casefold() or 'licenc' in query.casefold() for query in self.queries) if self.licence else all(any(word in query for query in self.queries) for word in ('Lumen', 'ORDER-Q7'))),
+                'case_query': (any('licen' in query.casefold() or 'licenc' in query.casefold() for query in self.queries) if self.licence else any(word in query for query in self.queries for word in ('Lumen', 'ORDER-Q7'))),
                 'bounded_queries': 1 <= len(self.queries) <= 3,
                 'selected': len(answers) == 5 and 'saved for this case' in answers[3],
                 'attribution': len(answers) == 5 and 'Message a1' in answers[4] and ('license application approved' if self.licence else 'INR 2400') in answers[4]}}
