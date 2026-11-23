@@ -662,3 +662,38 @@ not only its coarse scores. Synthetic case state is separate from the Telegram o
 Ordinary chat now uses the persistent no-web conversation runner; it does not require a case
 or silently deselect an existing one. The `application.turn` trace groups routing and conversation
 work, and `case.intake` metadata records `application.route`. Private content remains excluded.
+
+### Gmail case correspondence (#44)
+
+With Gmail connected, use the private Telegram chat:
+
+1. Select an existing grievance case (with company or order reference saved).
+2. Say **I agree to email processing** once. Selected correspondence may be used by
+   the configured model provider in case workflows; execution is not local-only.
+3. Ask **Search Gmail for this case**. Optional Gmail constraints can be stated in
+   the same request. The app searches using the case identifiers and shows at most
+   five message candidates, deduplicated by thread.
+4. Say **Select Gmail candidate REFERENCE**, using the displayed reference. Only
+   then is the full thread requested. Imported plain text is bounded; attachments,
+   remote images and HTML are not read. Truncation is reported.
+5. Ask **Show selected Gmail correspondence** to inspect saved text with mailbox,
+   thread and message references. The selection survives restarts. It is case evidence,
+   not confirmed case facts or a preference, and does not enable monitoring.
+
+After email processing is enabled, application-turn traces for that owner retain
+operation/status/usage metadata and explicit `email privacy` omission markers,
+regardless of either content-debug switch. This conservative rule also covers later
+turns that might quote email; it does not imply empty search results. Synthetic
+experiments have readable fixture/result wrapper spans; inner application payloads
+remain suppressed. No real inbox content is included in evaluation datasets.
+
+`uv run python manage.py evaluate_gmail` reruns the real-model Langfuse dataset
+against a controlled synthetic Gmail endpoint. It never uses the connected mailbox.
+It checks routing, case query terms, selection and source attribution; inspect actual
+answers in the experiment as well. Gmail drafts, reply checks and monitoring belong
+to the following milestones and are not implemented by #44.
+
+Deleting a case cascades to its stored candidates/imports; it does not delete any
+Gmail message. Disconnecting prevents new reads but preserves imported evidence.
+The owner accepted connection milestone #41 while explicitly deferring its live
+revocation/reconsent check. That check has not been claimed as passed.

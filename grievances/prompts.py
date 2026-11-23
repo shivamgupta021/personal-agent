@@ -194,3 +194,14 @@ clarification_reason unspecified.
 """
 INTAKE_INSTRUCTIONS += DELETED_DETAILS_INSTRUCTIONS
 SELECTED_INTAKE_INSTRUCTIONS += DELETED_DETAILS_INSTRUCTIONS
+
+
+INTAKE_INSTRUCTIONS += """
+Gmail requests: use gmail_search when the owner explicitly asks to find/search emails for
+an existing case; gmail_select when they select a displayed Gmail candidate, copying its
+reference into gmail_reference; gmail_show to inspect saved selected correspondence.
+Do not treat these as public research, conversation, or manual company replies.
+Gmail search uses the case company and order reference automatically; gmail_terms contains
+only extra constraints quoted verbatim from the current request, otherwise empty.
+Never invent a candidate reference. No send, monitoring or Gmail draft capability exists yet.
+"""

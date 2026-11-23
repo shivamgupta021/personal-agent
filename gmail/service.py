@@ -65,23 +65,29 @@ class GmailService:
             self.store.save(Connection(actual_email, credentials))
             return f'Connected Gmail: {actual_email}. Read-only access; no messages were fetched.'
 
-    def status(self) -> str:
+    @contextmanager
+    def connected(self) -> Iterator[Connection]:
+        """Keep credential refresh/account validation and mailbox reads under one lease."""
         with self.operation():
             connection = self.store.load()
             if connection is None:
-                return 'Gmail is not connected.'
-            credentials = connection.credentials
-            self.validate(credentials)
-            refreshed = not credentials.valid
-            if refreshed:
-                self.client.refresh(credentials)
-                self.validate(credentials)
-            actual_email = self.client.profile(credentials)
-            if actual_email.casefold() != connection.email.casefold():
-                raise GmailError('Gmail account verification changed. Reconnect before using it.')
-            if refreshed:
+                raise GmailError('Gmail is not connected. Run gmail_connect first.')
+            self.validate(connection.credentials)
+            if not connection.credentials.valid:
+                self.client.refresh(connection.credentials)
+                self.validate(connection.credentials)
                 self.store.save(connection)
-            return f'Gmail connected: {actual_email}. Read-only access verified; no messages were fetched.'
+            if self.client.profile(connection.credentials).casefold() != connection.email.casefold():
+                raise GmailError('Gmail account verification changed. Reconnect before using it.')
+            yield connection
+
+    def status(self) -> str:
+        # A disconnected status is informational, not a failed operation.
+        with self.operation():
+            if self.store.load() is None:
+                return 'Gmail is not connected.'
+        with self.connected() as connection:
+            return f'Gmail connected: {connection.email}. Read-only access verified; no messages were fetched.'
 
     def disconnect(self) -> str:
         with self.operation():

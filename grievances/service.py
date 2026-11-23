@@ -4,9 +4,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 import re
 
+
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, UsageLimitExceeded, RunCancelled
 from pydantic_ai.models import Model
 
+from gmail.correspondence import Correspondence
+from gmail.factory import GmailFactory
 from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn, PreparedReply
 from grievances.ownership import CaseOwnership
@@ -29,7 +32,8 @@ from conversations.memory import ConversationMemoryRunner
 
 
 class ApplicationService:
-    def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None, *, firecrawl: Firecrawl | None = None, trace_cleanup: CaseTraceCleanup | None = None) -> None:
+    def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None, *, firecrawl: Firecrawl | None = None, trace_cleanup: CaseTraceCleanup | None = None, correspondence: Correspondence | None = None) -> None:
+        self.correspondence = correspondence or Correspondence()
         self.store = CaseStore()
         self.deletion = CaseDeletionService(trace_cleanup)
         self.firecrawl = firecrawl
@@ -57,6 +61,8 @@ class ApplicationService:
             raise
 
     async def _run(self, turn: OwnerTurn, epoch: int) -> str:
+        if turn.text.strip().rstrip('.!').casefold() == 'i agree to email processing':
+            return await self.correspondence.accept(turn.owner_id)
         if self.is_memory_control(turn.text):
             return await self.memory(turn)
         replay = await self.store.replay(turn)
@@ -67,6 +73,9 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
+        if action.action.startswith('gmail_'):
+            return await self.correspondence.run(turn, action.action, selection, current,
+                action.gmail_reference, action.gmail_terms)
         if action.action in PROGRESS_ACTIONS:
             if current is None:
                 return 'Please select the intended case before reporting progress.'
@@ -172,7 +181,8 @@ class SubscriptionApplicationService:
             return await self.public_run(turn.text)
         try:
             async with self.subscription.model() as model:
-                return await ApplicationService(model, self.defer_public)._execute(turn, epoch)
+                return await ApplicationService(model, self.defer_public,
+                    correspondence=Correspondence(GmailFactory.mailbox))._execute(turn, epoch)
         except PublicResearchRequested:
             if epoch != await CaseOwnership().epoch(turn.owner_id):
                 return 'Case content was deleted. Please send a new public request.'

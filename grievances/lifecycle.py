@@ -3,6 +3,8 @@
 from collections.abc import Awaitable, Callable
 
 from core.tracing import tracing
+from core.email_telemetry import email_private
+from gmail.correspondence import Correspondence
 from core.turns import OwnerTurn, PreparedReply
 from grievances.cleanup import CaseTraceCleanup
 from grievances.deletion import CaseDeletionService
@@ -18,6 +20,14 @@ class ApplicationTurn:
 
     async def prepare(self, turn: OwnerTurn,
                       execute: Callable[[OwnerTurn, int], Awaitable[str]]) -> PreparedReply:
+        token = email_private.set(await Correspondence.consented(turn.owner_id))
+        try:
+            return await self._prepare(turn, execute)
+        finally:
+            email_private.reset(token)
+
+    async def _prepare(self, turn: OwnerTurn,
+                       execute: Callable[[OwnerTurn, int], Awaitable[str]]) -> PreparedReply:
         capture = ApplicationTrace(turn, self.trace_cleanup)
         async with capture.run() as span:
             epoch = await self.ownership.begin(turn)

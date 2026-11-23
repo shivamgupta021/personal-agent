@@ -19,6 +19,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from pydantic_ai import Agent
 from pydantic_ai.models.instrumented import InstrumentationSettings
 
+from core.email_telemetry import EmailMarker, EmailSafeExporter
+
 logger = logging.getLogger(__name__)
 _private_content: ContextVar[bool] = ContextVar('private_trace_content', default=False)
 _application_producer: ContextVar[bool] = ContextVar('application_trace_producer', default=False)
@@ -46,7 +48,8 @@ class Tracing:
         self._provider = TracerProvider(
             resource=Resource.create({'service.name': 'personal-agent'}), shutdown_on_exit=False,
         )
-        self._provider.add_span_processor(BatchSpanProcessor(exporter))
+        self._provider.add_span_processor(EmailMarker())
+        self._provider.add_span_processor(BatchSpanProcessor(EmailSafeExporter(exporter)))
         Agent.instrument_all(InstrumentationSettings(
             tracer_provider=self._provider,
             include_content=settings.LANGFUSE_CAPTURE_CONTENT,
