@@ -23,7 +23,6 @@ class IntakeAction(BaseModel):
     clarification_reason: Literal['unspecified', 'deleted_details'] = Field(default='unspecified',
         description='Use deleted_details only when the owner asks about retrieving details of a deleted case; this selects a fixed explanation, not a deletion action.')
     gmail_reference: str = Field(default='', max_length=128)
-    gmail_terms: str = Field(default='', max_length=500, description='Only extra Gmail search constraints explicitly supplied in the current user request, quoted verbatim.')
     case_id: str = ''
     public_brief: 'PublicResearchBrief | None' = None
     draft_version: int | None = Field(default=None, ge=1)

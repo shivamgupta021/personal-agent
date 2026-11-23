@@ -6,12 +6,14 @@ from uuid import uuid4
 
 from asgiref.sync import sync_to_async
 import httpx2
+from pydantic_ai.usage import RunUsage
 
 from core.turns import OwnerTurn
 from core.tracing import tracing
 from gmail import constants
 from gmail.errors import GmailError
 from gmail.mailbox import Mailbox
+from gmail.planner import GmailQueryPlanner
 from gmail.records import Candidate, ImportedMessage, MailResult, CorrespondenceSnapshot
 from gmail.models import CaseMailbox, EmailConsent
 from grievances.mutations import CaseMutation
@@ -22,8 +24,10 @@ CONSENT_MESSAGE = ('Selected email may be processed by the configured model prov
 
 
 class Correspondence:
-    def __init__(self, mailbox: Callable[[], AbstractContextManager[Mailbox]] | None = None) -> None:
+    def __init__(self, mailbox: Callable[[], AbstractContextManager[Mailbox]] | None = None,
+                 planner: GmailQueryPlanner | None = None) -> None:
         self.mailbox = mailbox
+        self.planner = planner
 
     @staticmethod
     async def consented(owner: str) -> bool:
@@ -35,7 +39,8 @@ class Correspondence:
         return 'Email processing enabled. Select a case and ask to search Gmail. Nothing has been read yet.'
 
     async def run(self, turn: OwnerTurn, action: str, selection: SelectionView,
-                  current: CaseView | None, reference: str = '', terms: str = '') -> str:
+                  current: CaseView | None, reference: str = '',
+                  usage: RunUsage | None = None, request_limit: int | None = None) -> str:
         if not await self.consented(turn.owner_id):
             return CONSENT_MESSAGE
         if current is None:
@@ -49,22 +54,36 @@ class Correspondence:
             if self.mailbox is None:
                 return 'Gmail access is unavailable in this session. Check the Gmail connection.'
             if action == 'gmail_search':
-                identifiers = [current.facts.get(key, '') for key in ('company', 'order_reference')]
-                identifiers = [value for value in identifiers if value]
-                if not identifiers:
-                    identifiers = [current.label]
-                if terms and (terms not in turn.text or len(terms) > constants.MAX_QUERY_CHARS):
-                    return 'Please state the search constraints explicitly; no search was performed.'
-                query = ' '.join('"' + value.replace('"', ' ').replace('\n', ' ') + '"' for value in identifiers)
-                if terms:
-                    query += ' ' + terms
-                if len(query) > constants.MAX_QUERY_CHARS:
-                    return 'The case search terms are too long. Narrow the case identifiers.'
+                if self.planner is None:
+                    return 'Gmail query planning is unavailable in this session.'
+                identifiers = {key: current.facts[key] for key in ('company', 'order_reference') if current.facts.get(key)}
                 await self._snapshot(turn, selection, current)
-                with self.mailbox() as mailbox, tracing.operation('gmail.search', {}, private=True) as span:
-                    result = await sync_to_async(mailbox.search)(query)
-                    span.set_attribute('gmail.results', len(result.items))
-                    span.set_attribute('gmail.truncated', result.truncated)
+                with tracing.operation('gmail.plan_queries', {}, kind='agent', private=True) as span:
+                    plan = await self.planner.run(turn.text, current.label, identifiers, usage, request_limit)
+                    span.set_attribute('gmail.query_count', len(plan.queries))
+                items: list[Candidate] = []
+                seen: set[str] = set()
+                account = ''
+                truncated = False
+                with self.mailbox() as mailbox:
+                    for query in plan.queries:
+                        await self._snapshot(turn, selection, current)
+                        with tracing.operation('gmail.search', {}, private=True) as span:
+                            found = await sync_to_async(mailbox.search)(query)
+                            span.set_attribute('gmail.results', len(found.items))
+                            span.set_attribute('gmail.truncated', found.truncated)
+                        if account and account != found.mailbox:
+                            raise GmailError('Mailbox changed during search')
+                        account = found.mailbox
+                        truncated |= found.truncated
+                        for candidate in found.items:
+                            if candidate.thread_id not in seen:
+                                seen.add(candidate.thread_id)
+                                items.append(candidate)
+                        if len(items) >= constants.MAX_CANDIDATES:
+                            truncated |= len(items) > constants.MAX_CANDIDATES or query != plan.queries[-1]
+                            break
+                result = MailResult(account, items[:constants.MAX_CANDIDATES], truncated)
                 return await self._save_search(turn, selection, current, result)
             if action == 'gmail_select':
                 if not reference or reference not in turn.text:
@@ -112,7 +131,7 @@ class Correspondence:
                 lines.append(f"{item['reference']} — {item['sender']} | {item['subject']} | {item['date']}\n{item['preview']}")
             lines.append('Select one by saying “Select Gmail candidate REFERENCE”.')
             if result.truncated:
-                lines.append('Results limited to the first five messages; refine the search for more.')
+                lines.append('Search reached its bounded result limit; refine the search for more.')
             return '\n\n'.join(lines)
 
     @sync_to_async

@@ -10,6 +10,7 @@ from pydantic_ai.models import Model
 
 from gmail.correspondence import Correspondence
 from gmail.factory import GmailFactory
+from gmail.planner import GmailQueryPlanner
 from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn, PreparedReply
 from grievances.ownership import CaseOwnership
@@ -75,7 +76,7 @@ class ApplicationService:
         usage, company_reply = intake.usage, intake.company_reply
         if action.action.startswith('gmail_'):
             return await self.correspondence.run(turn, action.action, selection, current,
-                action.gmail_reference, action.gmail_terms)
+                action.gmail_reference, usage, constants.MAX_MODEL_REQUESTS)
         if action.action in PROGRESS_ACTIONS:
             if current is None:
                 return 'Please select the intended case before reporting progress.'
@@ -182,7 +183,7 @@ class SubscriptionApplicationService:
         try:
             async with self.subscription.model() as model:
                 return await ApplicationService(model, self.defer_public,
-                    correspondence=Correspondence(GmailFactory.mailbox))._execute(turn, epoch)
+                    correspondence=Correspondence(GmailFactory.mailbox, GmailQueryPlanner(model)))._execute(turn, epoch)
         except PublicResearchRequested:
             if epoch != await CaseOwnership().epoch(turn.owner_id):
                 return 'Case content was deleted. Please send a new public request.'

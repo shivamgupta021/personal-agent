@@ -667,12 +667,12 @@ work, and `case.intake` metadata records `application.route`. Private content re
 
 With Gmail connected, use the private Telegram chat:
 
-1. Select an existing grievance case. Search uses its company/order reference when saved, otherwise its label.
+1. Select an existing grievance case. The dedicated Gmail planner uses its label and saved company/order reference.
 2. Say **I agree to email processing** once. Selected correspondence may be used by
    the configured model provider in case workflows; execution is not local-only.
 3. Ask **Search Gmail for this case**. Optional Gmail constraints can be stated in
-   the same request. The app searches using the case identifiers and shows at most
-   five message candidates, deduplicated by thread.
+   the same request. The planner generates up to three related Gmail API queries, then the app shows at most
+   five candidate threads across bounded searches. Full messages are not read during planning.
 4. Say **Select Gmail candidate REFERENCE**, using the displayed reference. Only
    then is the full thread requested. Imported plain text is bounded; attachments,
    remote images and HTML are not read. Truncation is reported.
@@ -697,3 +697,19 @@ Deleting a case cascades to its stored candidates/imports; it does not delete an
 Gmail message. Disconnecting prevents new reads but preserves imported evidence.
 The owner accepted connection milestone #41 while explicitly deferring its live
 revocation/reconsent check. That check has not been claimed as passed.
+
+
+Gmail query planning is independent of case routing and web research. To inspect a
+plan without searching Gmail:
+
+```sh
+uv run python manage.py plan_gmail_queries "Find emails about my licence approval" --case-label "licence approval"
+```
+
+The planner uses the existing subscription model, has no mailbox/web tools, and shares
+its request budget with the parent turn. It can use spelling variants and broader
+related terms rather than quoting the whole case label. Explicit ungrouped Gmail
+filters are preserved outside each alternative; complex Boolean expressions are
+interpreted by the model and should be reviewed in synthetic evaluations. Search still
+uses Google's official `users.messages.list(q=...)` and metadata reads; only an
+explicitly selected thread uses `users.threads.get(format=full)`.

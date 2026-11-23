@@ -17,6 +17,7 @@ from gmail.constants import SCOPES, TOKEN_URL
 from gmail.credentials import Connection
 from gmail.service import GmailService
 from gmail.mailbox import Mailbox
+from gmail.planner import GmailQueryPlanner
 from gmail.correspondence import Correspondence
 import json
 from pathlib import Path
@@ -142,6 +143,10 @@ class MailHarness:
         self.text = ''
         self.count = 0
         self.answers: list[str] = []
+        self.required_filters: list[str] = []
+        self.plan_queries = ['"Kettle"']
+        self.planner_calls = 0
+        self.empty_first = False
         self.include_company = True
         self.target_case = ''
         self.searches = 0
@@ -152,13 +157,16 @@ class MailHarness:
         self.credentials = MemoryCredentials()
         self.connection = GmailService(self.credentials, ProfileGoogle(), directory / 'credentials')
         self.http = httpx2.Client(transport=httpx2.MockTransport(self.google))
-        self.correspondence = Correspondence(lambda: nullcontext(Mailbox(self.connection, self.http)))
+        self.correspondence = Correspondence(lambda: nullcontext(Mailbox(self.connection, self.http)), GmailQueryPlanner(FunctionModel(self.model)))
 
     def google(self, request: httpx2.Request) -> httpx2.Response:
         assert request.method == 'GET'
         if request.url.path.endswith('/messages'):
             self.searches += 1
             assert 'Kettle' in request.url.params['q']
+            assert all(value in request.url.params['q'] for value in self.required_filters)
+            if self.empty_first and self.searches == 1:
+                return httpx2.Response(200, json={'messages': []})
             return httpx2.Response(200, json={'messages': [{'id': 'abc1', 'threadId': 'def1'}]})
         message: dict[str, Any] = {'id': 'abc1', 'threadId': 'def1', 'snippet': 'PRIVATE-SUBJECT preview', 'payload': {
             'headers': [{'name': 'Subject', 'value': 'PRIVATE-SUBJECT'}, {'name': 'From', 'value': 'help@example.com'}],
@@ -181,6 +189,10 @@ class MailHarness:
 
     def model(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         assert 'PRIVATE-BODY' not in str(messages)
+        if 'queries' in info.output_tools[0].parameters_json_schema.get('properties', {}):
+            self.planner_calls += 1
+            assert not info.function_tools
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'queries': self.plan_queries})])
         if self.text.startswith('Create'):
             action: dict[str, Any] = {'action': 'create', 'label': 'Kettle', 'intent_quote': 'Create case',
                 'facts': [{'key': 'company', 'value': 'Kettle', 'quote': 'Kettle'}]}
@@ -292,6 +304,56 @@ def test_named_case_can_search_before_company_is_known(tmp_path: Path) -> None:
         answer = await harness.send('Search Gmail for this case')
         assert 'Gmail candidates' in answer
         assert harness.searches == 1
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_gmail_planner_can_broaden_failed_search_without_reading_threads(tmp_path: Path) -> None:
+    harness = MailHarness(tmp_path)
+    harness.plan_queries = ['"Kettle exact phrase"', 'Kettle']
+    harness.empty_first = True
+    async def run() -> None:
+        await harness.send('Create case Kettle')
+        await harness.send('I agree to email processing')
+        answer = await harness.send('Search Gmail for this case')
+        assert harness.planner_calls == 1
+        assert harness.searches == 2
+        assert 'Gmail candidates' in answer
+        assert harness.full_reads == 0
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_bare_inbox_plans_never_reach_gmail(tmp_path: Path) -> None:
+    harness = MailHarness(tmp_path)
+    harness.plan_queries = ['in:anywhere']
+    async def run() -> None:
+        await harness.send('Create case Kettle')
+        await harness.send('I agree to email processing')
+        answer = await harness.send('Search Gmail for this case')
+        assert harness.searches == 0
+        assert 'Gmail candidates' not in answer
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_planner_broadening_preserves_explicit_gmail_filters(tmp_path: Path) -> None:
+    harness = MailHarness(tmp_path)
+    harness.required_filters = ['from:support@example.com', 'after:2026/01/01']
+    async def run() -> None:
+        await harness.send('Create case Kettle')
+        await harness.send('I agree to email processing')
+        answer = await harness.send('Search Gmail from:support@example.com after:2026/01/01')
+        assert 'Gmail candidates' in answer
     try:
         asyncio.run(run())
     finally:
