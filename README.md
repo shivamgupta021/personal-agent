@@ -9,7 +9,7 @@ A local Django project with a real research agent using your ChatGPT subscriptio
 | Telegram research with citations; persistent conversation, compaction, recall and explicit preferences | Implemented; regression coverage retained |
 | Grievance facts, reviewed public-policy research, local draft versions and manual progress | Implemented; legacy command-shaped administrative responses still exist |
 | Natural Gmail help: identify the case, plan searches, choose an unambiguous thread, refresh it and summarize evidence | Live Telegram checked; no candidate-reference commands needed |
-| Unsent Gmail drafts | Implemented and synthetic real-model experiment passed; live compose permission and one real draft acceptance still pending (#45) |
+| Unsent Gmail drafts | Implemented; synthetic real-model experiment and live Telegram → unsent Gmail draft acceptance passed (#45) |
 | Revisions preserving manual Gmail edits | Not completed (#46); new drafts preserve previous Gmail copies, but application context cannot see manual edits yet |
 | Verified sent-state/reply checks, background monitoring, reminders | Not completed (#47–#49) |
 
