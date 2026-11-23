@@ -45,7 +45,7 @@ class CaseDeletionService:
             try:
                 status = await self.cleanup.run(turn.owner_id) if self.cleanup else await CaseTraceCleanup.configured(turn.owner_id)
             except (httpx2.HTTPError, ValueError):
-                status = 'Synthetic trace cleanup pending. Say “retry case trace cleanup” later.'
+                status = 'Trace cleanup pending. Say “retry case trace cleanup” later.'
             return replace(result, message=result.message + '\n' + status)
         return result
 

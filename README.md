@@ -596,6 +596,11 @@ Its local record is `supplementary-final.json` in the same evidence bundle.
   case context and generated text in the configured Langfuse instance. The application
   root shows the current message and prepared reply; model spans show their actual context.
   Old traces cannot recover content that was never recorded.
+  Application turns use independent root traces so an enclosing experiment cannot
+  recreate their deleted spans when it finishes. Ambient trace/span IDs remain as
+  navigation metadata; [Langfuse currently ignores OpenTelemetry span links](https://langfuse.com/faq/all/opentelemetry-logs-metrics-span-links).
+  Callers must keep private request/response content out of their own enclosing spans:
+  independently captured caller content is outside application trace cleanup.
 - This assistant prepares drafts and records your reports. It does not send complaints,
   contact a company, attach documents, book anything or make payments.
 

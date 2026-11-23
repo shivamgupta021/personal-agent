@@ -2,14 +2,10 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, replace
-import json
 import re
 
-from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, UsageLimitExceeded, RunCancelled
 from pydantic_ai.models import Model
-from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn, PreparedReply
@@ -18,16 +14,14 @@ from grievances.deletion import CaseDeletionService
 from grievances.cleanup import CaseTraceCleanup
 from core.tracing import tracing
 from grievances import constants
-from grievances.correspondence import CompanyReplyParser
 from grievances.drafts import DraftService
 from grievances.policy import PolicyResearchService, PublicResearchBoundary
 from grievances.policy_store import PolicyStateChanged, PolicyStore
 from research.tools.firecrawl import Firecrawl
 from grievances.progress_store import ProgressChanged, ProgressStore
-from grievances.prompts import INTAKE_INSTRUCTIONS, SELECTED_INTAKE_INSTRUCTIONS
-from grievances.schema import IntakeAction
 from grievances.store import CaseStore
-from preferences.store import PreferenceStore
+from grievances.intake import CaseIntake, DRAFT_ACTIONS, POLICY_ACTIONS, PROGRESS_ACTIONS, GENERAL_ACTIONS
+from grievances.lifecycle import ApplicationTurn
 from subscriptions.service import SubscriptionService
 from conversations.constants import DELETE_CONVERSATION_PHRASES
 from conversations.service import ConversationService
@@ -41,10 +35,8 @@ class ApplicationService:
         self.firecrawl = firecrawl
         self.model = model
         self.public_run = public_run
-        self.agent: Agent[None, IntakeAction] = Agent(model, output_type=IntakeAction,
-            instructions=INTAKE_INSTRUCTIONS, name='case_intake', retries=constants.VALIDATION_RETRIES,
-            model_settings={'max_tokens': constants.MAX_OUTPUT_TOKENS})
-        self.agent.instrument = tracing.private_instrumentation()
+        self.intake = CaseIntake(model, self.store)
+        self.turns = ApplicationTurn(trace_cleanup)
 
     async def run(self, turn: OwnerTurn) -> str:
         return await (await self.prepare(turn)).render()
@@ -53,27 +45,7 @@ class ApplicationService:
         return (await self.deletion.delete(turn, case_id)).message
 
     async def prepare(self, turn: OwnerTurn) -> PreparedReply:
-        with tracing.operation('application.turn', {'message': turn.text}, kind='agent', private=True) as span:
-            span.set_attribute('langfuse.session.id', turn.owner_id)
-            reply = await self._prepare(turn)
-            tracing.record_output(span, {'answer': await reply.render()})
-            return reply
-
-    async def _prepare(self, turn: OwnerTurn) -> PreparedReply:
-        epoch = await CaseOwnership().begin(turn)
-        if epoch != await CaseOwnership().epoch(turn.owner_id):
-            text = 'This delivery predates case deletion; nothing was recreated. Please send a new request.'
-        else:
-            control = await self.deletion.control(turn)
-            if control is None:
-                text = await self._execute(turn, epoch)
-            else:
-                text = control.message
-                if control.deleted:
-                    epoch = await CaseOwnership().epoch(turn.owner_id)
-        async def valid() -> bool:
-            return epoch == await CaseOwnership().epoch(turn.owner_id)
-        return PreparedReply(text, valid)
+        return await self.turns.prepare(turn, self._execute)
 
     async def _execute(self, turn: OwnerTurn, epoch: int) -> str:
         try:
@@ -90,70 +62,12 @@ class ApplicationService:
         replay = await self.store.replay(turn)
         if replay:
             return replay
-        if len(turn.text) > constants.MAX_INPUT_CHARS:
-            return 'Please send a shorter case message. Nothing changed.'
-        company_reply = CompanyReplyParser().parse(turn.text)
-        selection = replace(await self.store.selection(turn.owner_id, turn.conversation_id), deletion_epoch=epoch)
-        current = await self.store.get_case(turn.owner_id, selection.case_id) if selection.case_id else None
-        brief = await PolicyStore().latest_brief(turn.owner_id, current.id) if current else None
-        research_status = {'reviewed': brief is not None, 'confirmed': bool(brief and brief.confirmed),
-                           'revision': brief.revision if brief else None,
-                           'matches_current_facts': bool(brief and current and brief.fact_revision == current.revision)}
-        progress = await ProgressStore().snapshot(turn.owner_id, current.id) if current else None
-        draft_versions = [draft.version for draft in await self.store.list_drafts(turn.owner_id, current.id)] if current else []
-        cases = await self.store.list_cases(turn.owner_id)
-        preferences = await PreferenceStore().list(turn.owner_id)
-        payload = {'current_request': turn.text, 'research_status': research_status, 'draft_versions': draft_versions,
-                   'selected_case': {'id': current.id} if current else None,
-                   'case_labels': [asdict(case) for case in cases],
-                   'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences]}
-        encoded = json.dumps(payload)
-        if len(encoded) > constants.MAX_CONTEXT_CHARS:
-            return 'This case directory exceeds the intake context limit. Nothing changed.'
-        usage = RunUsage()
-        with tracing.operation('case.intake', payload, kind='agent', private=True) as span:
-            result = await self.agent.run(encoded, usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
-                                          timeout=constants.RUN_TIMEOUT_SECONDS)
-            span.set_attribute('application.route', result.output.action)
-            tracing.record_output(span, result.output.model_dump(mode='json'))
-        action = result.output
-        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up') and current:
-            messages: list[str] = []
-            size = len(json.dumps(current.facts)) + len(turn.text)
-            for message in reversed(current.messages):
-                if size + len(message) > constants.MAX_CONTEXT_CHARS // 2:
-                    break
-                messages.insert(0, message)
-                size += len(message)
-            selected_payload = json.dumps({'current_request': turn.text, 'research_status': research_status,
-                'draft_versions': draft_versions, 'progress': asdict(progress) if progress else None,
-                'selected_case': {'id': current.id, 'facts': current.facts, 'messages': messages},
-                'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences]})
-            if len(selected_payload) > constants.MAX_CONTEXT_CHARS:
-                return 'This case exceeds the intake context limit. Nothing changed.'
-            with tracing.operation('case.selected_intake', {}, kind='agent', private=True):
-                action = (await self.agent.run(selected_payload, instructions=SELECTED_INTAKE_INSTRUCTIONS, usage=usage,
-                    usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
-                    timeout=constants.RUN_TIMEOUT_SECONDS)).output
-            if action.action not in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up', 'clarify'):
-                return 'Please clarify the intended case action. Nothing changed.'
-        if company_reply is not None and action.action not in ('record_reply', 'clarify'):
-            return 'Company correspondence cannot authorize case changes or sending. Please save the quoted reply first; nothing was changed.'
-        if any(f.quote not in turn.text or f.value not in f.quote for f in action.facts):
-            return 'I could not verify the supplied facts. Nothing changed; please state them explicitly.'
-        if action.action == 'delete':
-            return 'Please explicitly say “Delete this case” or “Delete case LABEL”. Nothing changed.'
-        if action.action in ('create', 'select', 'leave') and (not action.intent_quote or action.intent_quote not in turn.text):
-            return 'Please explicitly state the case action. Nothing changed.'
-        if action.action == 'create' and (not action.label.strip() or action.label not in turn.text
-                or len(' '.join(action.label.casefold().split())) > 120):
-            return 'Please supply a short label for the new case. Nothing changed.'
-        if action.correction_quote and (action.correction_quote not in turn.text or not re.search(
-                r'\b(correct(?:ion)?|replace|change|update|amend)\b', action.correction_quote, re.IGNORECASE)):
-            return 'Please explicitly state the correction. Nothing changed.'
-        if action.action in ('show', 'update', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up') and action.case_id and action.case_id != selection.case_id:
-            return 'Please explicitly select the intended case first. Nothing changed.'
-        if action.action in ('record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up'):
+        intake = await self.intake.interpret(turn, epoch)
+        if isinstance(intake, str):
+            return intake
+        action, selection, current = intake.action, intake.selection, intake.current
+        usage, company_reply = intake.usage, intake.company_reply
+        if action.action in PROGRESS_ACTIONS:
             if current is None:
                 return 'Please select the intended case before reporting progress.'
             if action.facts or action.correction_quote:
@@ -185,7 +99,7 @@ class ApplicationService:
                 return sent.message
             except ProgressChanged:
                 return 'Case state changed while recording progress. Nothing was saved; please try again.'
-        if action.action in ('review_research', 'confirm_research', 'research'):
+        if action.action in POLICY_ACTIONS:
             if current is None:
                 return 'Please select the intended case before policy research.'
             if action.facts or action.correction_quote:
@@ -203,7 +117,7 @@ class ApplicationService:
                 return await PolicyResearchService(self.model, self.store, self.firecrawl).run(turn, selection, current, usage)
             except PolicyStateChanged:
                 return 'Case facts, selection or public research fields changed. No research changes were saved; please review them again.'
-        if action.action in ('draft', 'list_drafts', 'read_draft'):
+        if action.action in DRAFT_ACTIONS:
             if current is None:
                 return 'Please select the intended case before requesting drafts.'
             if action.facts or action.correction_quote:
@@ -211,7 +125,7 @@ class ApplicationService:
             if action.action == 'draft':
                 return await DraftService(self.model, self.store).run(turn, selection, current, usage)
             return await self.store.read_drafts(turn, selection, current, action.draft_version, listing=action.action == 'list_drafts')
-        if action.action in ('conversation', 'memory', 'public') and not await self.store.general_allowed(turn, epoch):
+        if action.action in GENERAL_ACTIONS and not await self.store.general_allowed(turn, epoch):
             return 'Case material cannot become general memory or public research. Please send a new independent request.'
         if action.action in ('conversation', 'memory'):
             if action.facts:
@@ -220,7 +134,8 @@ class ApplicationService:
         if action.action == 'public':
             if current or action.facts:
                 return 'Please explicitly return to general research and send a public question separately, or select a case.'
-            return await self.public_run(turn.text) if self.public_run else 'Public research is unavailable in this session.'
+            with tracing.public_content():
+                return await self.public_run(turn.text) if self.public_run else 'Public research is unavailable in this session.'
         return await self.store.apply(turn, action, selection, current)
 
     @staticmethod
@@ -250,26 +165,19 @@ class SubscriptionApplicationService:
         return await (await self.prepare(turn)).render()
 
     async def prepare(self, turn: OwnerTurn) -> PreparedReply:
-        epoch = await CaseOwnership().begin(turn)
-        async def valid() -> bool:
-            return epoch == await CaseOwnership().epoch(turn.owner_id)
-        if epoch != await CaseOwnership().epoch(turn.owner_id):
-            return PreparedReply('This delivery predates deletion; nothing was recreated.', valid)
-        control = await CaseDeletionService().control(turn)
-        if control is not None:
-            if control.deleted:
-                epoch = await CaseOwnership().epoch(turn.owner_id)
-            return PreparedReply(control.message, valid)
+        return await ApplicationTurn().prepare(turn, self._execute)
+
+    async def _execute(self, turn: OwnerTurn, epoch: int) -> str:
         if ApplicationService.is_memory_control(turn.text):
-            with tracing.operation('application.memory', {}, kind='agent', private=True):
-                return PreparedReply(await self.public_run(turn.text), valid)
+            return await self.public_run(turn.text)
         try:
             async with self.subscription.model() as model:
-                return await ApplicationService(model, self.defer_public).prepare(turn)
+                return await ApplicationService(model, self.defer_public)._execute(turn, epoch)
         except PublicResearchRequested:
-            if not await valid():
-                return PreparedReply('Case content was deleted. Please send a new public request.', valid)
-            return PreparedReply(await self.public_run(turn.text), valid)
+            if epoch != await CaseOwnership().epoch(turn.owner_id):
+                return 'Case content was deleted. Please send a new public request.'
+            with tracing.public_content():
+                return await self.public_run(turn.text)
 
     async def defer_public(self, message: str) -> str:
         raise PublicResearchRequested

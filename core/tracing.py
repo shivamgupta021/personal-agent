@@ -8,7 +8,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from opentelemetry.trace import NoOpTracerProvider, Span, StatusCode
+from opentelemetry.context import Context
+from opentelemetry.trace import Link, NoOpTracerProvider, Span, StatusCode, get_current_span
 
 from django.conf import settings
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -20,6 +21,7 @@ from pydantic_ai.models.instrumented import InstrumentationSettings
 
 logger = logging.getLogger(__name__)
 _private_content: ContextVar[bool] = ContextVar('private_trace_content', default=False)
+_application_producer: ContextVar[bool] = ContextVar('application_trace_producer', default=False)
 
 
 class Tracing:
@@ -69,12 +71,21 @@ class Tracing:
             not _private_content.get() or settings.LANGFUSE_CAPTURE_PRIVATE_CONTENT)
 
     @contextmanager
-    def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever', private: bool = False) -> Iterator[Span]:
+    def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever', private: bool = False, root: bool = False) -> Iterator[Span]:
         provider = self._provider or NoOpTracerProvider()
+        ambient = get_current_span()
+        ambient_context = ambient.get_span_context()
+        links = [Link(ambient_context)] if root and ambient_context.is_valid else []
         with provider.get_tracer('personal-agent.retrieval').start_as_current_span(
-            name, record_exception=False, set_status_on_exception=False,
+            name, context=Context() if root else None, links=links,
+            record_exception=False, set_status_on_exception=False,
             attributes={'langfuse.observation.type': kind},
         ) as span:
+            if links and span.is_recording():
+                # Langfuse ignores OTel links; retain content-free navigation metadata.
+                span.set_attribute('langfuse.observation.metadata.ambient_trace_id', format(ambient_context.trace_id, '032x'))
+                span.set_attribute('langfuse.observation.metadata.ambient_span_id', format(ambient_context.span_id, '016x'))
+                ambient.add_event('application.turn', {'application.trace_id': format(span.get_span_context().trace_id, '032x')})
             token = _private_content.set(private or _private_content.get())
             if self.capture_content():
                 span.set_attribute('langfuse.observation.input', json.dumps(inputs))
@@ -91,6 +102,31 @@ class Tracing:
             span.set_attribute('langfuse.observation.output', json.dumps(output))
         if 'error' in output:
             span.set_status(StatusCode.ERROR)
+
+    @contextmanager
+    def public_content(self) -> Iterator[None]:
+        """Use public capture policy after the application authorizes public research."""
+        token = _private_content.set(False)
+        try:
+            yield
+        finally:
+            _private_content.reset(token)
+
+    @staticmethod
+    def application_producer_active() -> bool:
+        return _application_producer.get()
+
+    @contextmanager
+    def application_producer(self) -> Iterator[None]:
+        token = _application_producer.set(True)
+        try:
+            yield
+        finally:
+            _application_producer.reset(token)
+
+    def record_input(self, span: Span, inputs: dict[str, Any]) -> None:
+        if self.capture_content():
+            span.set_attribute('langfuse.observation.input', json.dumps(inputs))
 
     def flush(self) -> bool:
         if self._provider is not None:
