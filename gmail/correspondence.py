@@ -52,7 +52,7 @@ class Correspondence:
                 identifiers = [current.facts.get(key, '') for key in ('company', 'order_reference')]
                 identifiers = [value for value in identifiers if value]
                 if not identifiers:
-                    return 'Save the company or order reference in this case before searching Gmail.'
+                    identifiers = [current.label]
                 if terms and (terms not in turn.text or len(terms) > constants.MAX_QUERY_CHARS):
                     return 'Please state the search constraints explicitly; no search was performed.'
                 query = ' '.join('"' + value.replace('"', ' ').replace('\n', ' ') + '"' for value in identifiers)

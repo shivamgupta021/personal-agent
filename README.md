@@ -667,7 +667,7 @@ work, and `case.intake` metadata records `application.route`. Private content re
 
 With Gmail connected, use the private Telegram chat:
 
-1. Select an existing grievance case (with company or order reference saved).
+1. Select an existing grievance case. Search uses its company/order reference when saved, otherwise its label.
 2. Say **I agree to email processing** once. Selected correspondence may be used by
    the configured model provider in case workflows; execution is not local-only.
 3. Ask **Search Gmail for this case**. Optional Gmail constraints can be stated in

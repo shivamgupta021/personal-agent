@@ -142,6 +142,7 @@ class MailHarness:
         self.text = ''
         self.count = 0
         self.answers: list[str] = []
+        self.include_company = True
         self.target_case = ''
         self.searches = 0
         self.full_reads = 0
@@ -189,6 +190,8 @@ class MailHarness:
             action = {'action': 'gmail_show'}
         else:
             action = {'action': 'gmail_search'}
+        if action['action'] == 'create' and not self.include_company:
+            action['facts'] = []
         if str(action['action']).startswith('gmail_'):
             action['case_id'] = self.target_case
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, action)])
@@ -273,6 +276,22 @@ def test_conflicting_case_target_is_clarified_before_gmail_search(tmp_path: Path
         answer = await harness.send('Search Gmail for the other case')
         assert 'select the intended case' in answer
         assert harness.searches == 0
+    try:
+        asyncio.run(run())
+    finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_named_case_can_search_before_company_is_known(tmp_path: Path) -> None:
+    harness = MailHarness(tmp_path)
+    harness.include_company = False
+    async def run() -> None:
+        await harness.send('Create case Kettle')
+        await harness.send('I agree to email processing')
+        answer = await harness.send('Search Gmail for this case')
+        assert 'Gmail candidates' in answer
+        assert harness.searches == 1
     try:
         asyncio.run(run())
     finally:
