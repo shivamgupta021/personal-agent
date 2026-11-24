@@ -16,7 +16,7 @@ from pydantic_ai.usage import RunUsage
 from core.turns import OwnerTurn
 from core.tracing import tracing
 from gmail import constants
-from gmail.errors import GmailError
+from gmail.errors import GmailError, GmailDisconnected
 from gmail.mailbox import Mailbox
 from gmail.planner import GmailQueryPlanner
 from gmail.records import Candidate, ImportedMessage, MailResult, CorrespondenceSnapshot
@@ -26,12 +26,14 @@ from grievances.models import CaseSelection
 from grievances.store import CaseView, SelectionView
 
 CONSENT_MESSAGE = ('Selected email may be processed by the configured model provider, not only on your Mac. '
-    'Email content is excluded from traces. Say “I agree to email processing” to enable case mail access.')
+    'Local debugging may record email content in Langfuse when explicitly enabled. Say “I agree to email processing” to enable case mail access.')
 
 
 class Correspondence:
     def __init__(self, mailbox: Callable[[], AbstractContextManager[Mailbox]] | None = None,
-                 planner: GmailQueryPlanner | None = None) -> None:
+                 planner: GmailQueryPlanner | None = None,
+                 ensure_connected: Callable[[], None] | None = None) -> None:
+        self.ensure_connected = ensure_connected
         self.mailbox = mailbox
         self.planner = planner
 
@@ -100,6 +102,10 @@ class Correspondence:
                     span.set_attribute('gmail.truncated', thread_result.truncated)
                 return await self._save_selection(turn, selection, current, reference, match.thread_id, thread_result)
             return 'Please ask to search Gmail, select a displayed candidate, or show selected correspondence.'
+        except GmailDisconnected:
+            if current is not None:
+                await self.remember_goal(turn, selection, current, constants.CONNECT_MESSAGE)
+            return constants.CONNECT_MESSAGE
         except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
             return 'Gmail could not complete this request. Check the connection or search again; no new correspondence was saved.'
 
@@ -107,6 +113,8 @@ class Correspondence:
                       usage: RunUsage | None, request_limit: int | None) -> MailResult[Candidate]:
         if self.planner is None or self.mailbox is None:
             raise GmailError('Gmail search is unavailable')
+        if self.ensure_connected is not None:
+            await sync_to_async(self.ensure_connected)()
         identifiers = {key: current.facts[key] for key in ('company', 'order_reference') if current.facts.get(key)}
         await self._snapshot(turn, selection, current)
         with tracing.operation('gmail.plan_queries', {'request': turn.text, 'case': current.label, 'identifiers': identifiers}, kind='agent', private=True) as span:
@@ -189,6 +197,10 @@ class Correspondence:
                 [asdict(message) for message in row.messages], row.truncated, usage)
             await self._snapshot(turn, selection, current)
             return answer
+        except GmailDisconnected:
+            if current is not None:
+                await self.remember_goal(turn, selection, current, constants.CONNECT_MESSAGE)
+            return constants.CONNECT_MESSAGE
         except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
             return 'I could not read the relevant emails just now. Please try again; I have not sent anything.'
 

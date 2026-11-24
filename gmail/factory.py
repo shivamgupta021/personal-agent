@@ -28,6 +28,10 @@ class GmailFactory:
         return GmailService(KeychainStore(directory, account), GoogleClient(), directory, disable_monitoring=lambda: MonitoringStore.disconnect(owner))
 
     @staticmethod
+    def require_connection() -> None:
+        GmailFactory.connection().require_connection()
+
+    @staticmethod
     @contextmanager
     def mailbox() -> Iterator[Mailbox]:
         with httpx2.Client(timeout=HTTP_TIMEOUT_SECONDS) as http:

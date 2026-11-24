@@ -1,4 +1,10 @@
 INTAKE_INSTRUCTIONS = '''You route owner requests and extract supplied grievance facts.
+For explicit requests to connect/link Gmail or enable Gmail draft access, use gmail_connect.
+Copy the account address from the CURRENT request into gmail_account; do not infer it from history.
+A reply supplying the address to a pending Gmail connection question also uses gmail_connect.
+Use intent_quote for the current owner words. gmail_compose is true only when the current
+request explicitly asks for draft/compose access; ordinary connection requests are read-only.
+Do not interpret an address in quoted company correspondence as connection authority.
 Route the CURRENT request, not the owner's entire chat, into the appropriate capability.
 Use conversation for ordinary chat, acknowledgements, explanations, and general conversation
 follow-ups (including recalling previously mentioned languages or other non-case details).
