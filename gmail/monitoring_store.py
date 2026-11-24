@@ -8,9 +8,11 @@ from django.db import transaction
 from django.db.models import F
 
 from core.turns import OwnerTurn
-from gmail.models import CaseMailbox, CaseMonitor, EmailConsent, MonitorNotification
+from gmail.models import CaseMailbox, CaseMonitor, EmailConsent, MonitorNotification, CaseReminder
 from gmail.monitoring_constants import MAX_FAILURE_DELAY_SECONDS, MAX_NOTIFICATION_CHARS, POLL_SECONDS
 from gmail.reply_checks import ReplyCheckResult
+from gmail.reminder_store import ReminderStore
+from gmail.reminder_constants import ReminderStatus
 from gmail.reply_constants import MAX_SEEN_MESSAGES
 from grievances.models import CaseOperationReceipt, CaseSelection, SentReport
 from grievances.mutations import CaseMutation
@@ -37,7 +39,7 @@ class MonitorJob:
 class MonitoringStore:
     @sync_to_async
     def control(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                action: str, now: datetime) -> str:
+                action: str, now: datetime, *, automatic: bool = False) -> str:
         with CaseMutation(turn, selection, current, operation='read') as mutation:
             if mutation.failure or mutation.case is None:
                 return 'The case changed. Please try again.'
@@ -46,10 +48,12 @@ class MonitoringStore:
                 return 'This monitoring request was already processed. No additional changes were made.'
             row = CaseMailbox.objects.select_for_update().filter(case=mutation.case).first()
             monitor = CaseMonitor.objects.filter(mailbox_record=row).first() if row else None
+            if automatic and (monitor is not None or row is None or not row.selected_thread):
+                return ''
             if action == 'gmail_monitor_status':
                 if monitor is None or not monitor.active:
                     return f'Monitoring is off for {current.label}.'
-                uncertain = MonitorNotification.objects.filter(monitor=monitor, attempted=True, delivered=False).exists()
+                uncertain = MonitorNotification.objects.filter(monitor=monitor, attempted=True, delivered=False, cancelled=False).exists()
                 return (f'Monitoring is on for {current.label}, approximately every five minutes while the local bot runs.'
                     + (' Reply status is currently unknown; checks are retrying with backoff.' if monitor.failures else '')
                     + (' A previous notification delivery is unconfirmed; it will not be automatically resent.' if uncertain else '')
@@ -90,6 +94,8 @@ class MonitoringStore:
 
     @staticmethod
     def stop(monitor: CaseMonitor, reason: str) -> None:
+        CaseReminder.objects.filter(monitor=monitor, status__in=[ReminderStatus.PENDING, ReminderStatus.QUEUED, ReminderStatus.CLARIFY]).update(status=ReminderStatus.CANCELLED, revision=F('revision') + 1, reason=reason)
+        MonitorNotification.objects.filter(monitor=monitor, attempted=False).update(cancelled=True)
         monitor.active = False
         monitor.generation += 1
         monitor.stopped_reason = reason
@@ -98,6 +104,9 @@ class MonitoringStore:
     @staticmethod
     def disconnect(owner_suffix: str) -> None:
         """Called before disabling credentials; reconnect never re-enables monitoring."""
+        CaseReminder.objects.filter(monitor__mailbox_record__case__owner_id__endswith=':' + owner_suffix,
+            status__in=[ReminderStatus.PENDING, ReminderStatus.QUEUED, ReminderStatus.CLARIFY]).update(
+                status=ReminderStatus.CANCELLED, revision=F('revision') + 1, reason='Gmail disconnected')
         CaseMonitor.objects.filter(mailbox_record__case__owner_id__endswith=':' + owner_suffix,
             active=True).update(active=False, generation=F('generation') + 1, stopped_reason='Gmail disconnected')
 
@@ -174,6 +183,7 @@ class MonitoringStore:
                 monitor.failures, monitor.failure_alerted = 0, False
                 monitor.next_check = now + timedelta(seconds=POLL_SECONDS)
             monitor.save()
+            ReminderStore.assess(monitor, result, now)
             if text:
                 MonitorNotification.objects.create(monitor=monitor, generation=job.generation,
                     text=text[:MAX_NOTIFICATION_CHARS])
@@ -182,7 +192,7 @@ class MonitoringStore:
     def pending(self, owner_id: str) -> list[tuple[int, MonitorJob, str]]:
         notifications = MonitorNotification.objects.select_related('monitor__mailbox_record__case').filter(
             monitor__mailbox_record__case__owner_id=owner_id, monitor__active=True,
-            generation=F('monitor__generation'), attempted=False).order_by('pk')[:10]
+            generation=F('monitor__generation'), attempted=False, cancelled=False).order_by('pk')[:10]
         with transaction.atomic():
             deletion_epoch = CaseOwnership.lock(owner_id).deletion_epoch
             return [(note.pk, MonitorJob(note.monitor.pk, note.generation, owner_id,
@@ -194,9 +204,25 @@ class MonitoringStore:
         with transaction.atomic():
             if self.locked_job(job) is None:
                 return False
+            note = MonitorNotification.objects.filter(pk=identifier, monitor_id=job.identifier).first()
+            if note is None or not ReminderStore.notification_valid(note):
+                return False
             return bool(MonitorNotification.objects.filter(pk=identifier, attempted=False,
                 monitor_id=job.identifier, generation=job.generation).update(attempted=True))
 
     @sync_to_async
     def delivered(self, identifier: int) -> None:
-        MonitorNotification.objects.filter(pk=identifier, attempted=True).update(delivered=True)
+        with transaction.atomic():
+            note = MonitorNotification.objects.filter(pk=identifier, attempted=True).first()
+            if note is None or not ReminderStore.notification_valid(note):
+                return
+            note.delivered = True
+            note.save(update_fields=['delivered'])
+            if note.reminder_revision:
+                CaseReminder.objects.filter(monitor=note.monitor, revision=note.reminder_revision,
+                    status=ReminderStatus.QUEUED).update(status=ReminderStatus.NOTIFIED)
+
+    @sync_to_async
+    def notification_valid(self, identifier: int) -> bool:
+        note = MonitorNotification.objects.filter(pk=identifier).first()
+        return note is not None and ReminderStore.notification_valid(note)

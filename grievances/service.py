@@ -16,6 +16,7 @@ from gmail.factory import GmailFactory
 from gmail.planner import GmailQueryPlanner
 from gmail.reply_checks import GmailReplyChecks
 from gmail.monitoring_store import MonitoringStore
+from gmail.reminder_store import ReminderStore
 from django.utils import timezone
 from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn, PreparedReply
@@ -29,6 +30,7 @@ from grievances.policy import PolicyResearchService, PublicResearchBoundary
 from grievances.policy_store import PolicyStateChanged, PolicyStore
 from research.tools.firecrawl import Firecrawl
 from grievances.progress_store import ProgressChanged, ProgressStore
+from grievances.schema import IntakeAction
 from grievances.store import CaseStore
 from grievances.intake import CaseIntake, DRAFT_ACTIONS, POLICY_ACTIONS, PROGRESS_ACTIONS, GENERAL_ACTIONS
 from grievances.lifecycle import ApplicationTurn
@@ -82,6 +84,32 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
+        if action.action.startswith('gmail_reminder_'):
+            if action.case_id and action.case_id != selection.case_id:
+                target = await self.store.get_case(turn.owner_id, action.case_id)
+                if target is None or target.label.casefold() not in turn.text.casefold():
+                    return 'Which case is this reminder for? Please name it explicitly.'
+                await self.store.apply(turn.followup().followup(), IntakeAction(action='select',
+                    case_id=target.id, intent_quote=turn.text), selection, current)
+                reminder_selection = await self.store.selection(turn.owner_id, turn.conversation_id)
+                if reminder_selection.case_id != target.id or reminder_selection.deletion_epoch != selection.deletion_epoch:
+                    return 'The case changed. Please try again.'
+                selection, current = reminder_selection, target
+            if current is None:
+                return 'Which case is this reminder for?'
+            now = timezone.now()
+            error = ReminderStore.deadline_error(action, turn.text, now)
+            if error:
+                return error
+            if action.action == 'gmail_reminder_set':
+                if self.correspondence.mailbox is None:
+                    return 'Gmail is unavailable; I could not verify correspondence for this reminder.'
+                checked = await GmailReplyChecks(self.model, self.correspondence.mailbox).check(
+                    turn.followup().followup().followup(), selection, current, usage=usage, reuse_analysis=True)
+                if not checked.verified:
+                    return 'I could not check the selected correspondence. No reminder was scheduled; please try again.'
+                await MonitoringStore().control(turn.followup(), selection, current, 'gmail_monitor_start', now)
+            return await ReminderStore().control(turn, selection, current, action, now)
         if action.action in ('gmail_monitor_start', 'gmail_monitor_stop', 'gmail_monitor_status'):
             if current is None:
                 return 'Which case should I monitor?'

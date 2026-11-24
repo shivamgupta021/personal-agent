@@ -36,6 +36,7 @@ class MonitoringMailbox(Mailbox):
     def __init__(self, messages: list[ImportedMessage]) -> None:
         self.messages = messages
         self.failure = False
+        self.truncated = False
         self.account_valid = True
         self.reads = 0
         self.during_read: Callable[[], None] = lambda: None
@@ -50,7 +51,7 @@ class MonitoringMailbox(Mailbox):
         self.during_read()
         if self.failure:
             raise GmailError('Unavailable')
-        return MailResult(expected_mailbox, list(self.messages))
+        return MailResult(expected_mailbox, list(self.messages), truncated=self.truncated)
 
 
 class MonitoringHarness:

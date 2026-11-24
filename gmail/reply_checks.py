@@ -54,6 +54,8 @@ class ReplyCheckResult:
     answer: str
     verified: bool = False
     findings: tuple[ReplyFinding, ...] = ()
+    message_ids: tuple[str, ...] = ()
+    truncated: bool = False
 
 
 class GmailReplyChecks:
@@ -109,7 +111,8 @@ class GmailReplyChecks:
             with self.mailbox() as mailbox:
                 await sync_to_async(mailbox.verify_account)(snapshot.mailbox)
             await self.save(turn, selection, current, snapshot, result, findings, sent_matches, answer)
-            return ReplyCheckResult(answer, True, tuple(findings))
+            return ReplyCheckResult(answer, True, tuple(findings),
+                tuple(message.message_id for message in messages if 'DRAFT' not in message.labels), result.truncated)
         except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
             return ReplyCheckResult('I could not verify the reply status just now. The previous record is unchanged; please try again.')
 

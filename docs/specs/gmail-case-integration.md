@@ -117,3 +117,8 @@ This repair covers existing cases. New-case discovery, refreshing correspondence
 ### Local development tracing override — 24 November 2026
 
 The owner explicitly requested readable real-email traces during local development, superseding the earlier unconditional telemetry exclusion for this opt-in mode. `LANGFUSE_CAPTURE_EMAIL_CONTENT=true` together with both general/private capture flags enables payload capture only for a loopback Langfuse endpoint. Default and remote-endpoint email exclusion remain. Gmail operation spans include bounded request/result data; credentials remain outside trace payloads. This does not authorize putting real email into evaluation datasets. Restart running processes after changing settings.
+
+
+## 24 November refinement
+
+The owner approved automatic monitoring during active case assistance after relevant correspondence is selected. Confirm activation in the reply; preserve an explicit previous stop. This supersedes earlier opt-in-only monitoring wording. Exact reminder deadlines remain owner-requested or explicitly accepted, and sending evidence remains required. Consolidated schema and architecture review is deferred until the building phase is complete; then perform an isolated fresh-user demo. See `docs/architecture/data-model.md`.

@@ -1,5 +1,7 @@
 """Translate an ordinary case goal into private mail evidence and a useful reply."""
 import json
+from django.utils import timezone
+from gmail.monitoring_store import MonitoringStore
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
@@ -72,9 +74,12 @@ class CaseAssistance:
         if not await self.correspondence.consented(turn.owner_id):
             await self.correspondence.remember_goal(turn, selection, current)
             return await self.correspondence.run(turn, 'gmail_search', selection, current)
-        return await self.correspondence.assist(turn, selection, current, usage, self,
+        answer = await self.correspondence.assist(turn, selection, current, usage, self,
             draft=action.gmail_draft or action.gmail_revision, recipient=action.gmail_recipient,
             revision=action.gmail_revision, version=action.draft_version)
+        monitoring = await MonitoringStore().control(turn.followup().followup().followup(),
+            selection, current, 'gmail_monitor_start', timezone.now(), automatic=True)
+        return answer + ('\n\n' + monitoring if monitoring.startswith('I’ll watch') else '')
 
     async def draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
                     row: CorrespondenceSnapshot, usage: RunUsage, recipient: str,

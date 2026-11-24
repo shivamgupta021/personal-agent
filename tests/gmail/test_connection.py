@@ -17,7 +17,7 @@ import requests
 from gmail.client import GoogleClient, TimeoutAdapter
 from gmail.commands import GmailCommand
 from gmail.constants import AUTH_URLS, HTTP_TIMEOUT_SECONDS, PROFILE_URL, REVOKE_URL, SCOPES, TOKEN_URL
-from gmail.credentials import KeychainStore
+from gmail.credentials import Connection, KeychainStore
 from gmail.errors import GmailError
 from gmail.service import GmailService
 
@@ -439,3 +439,21 @@ def test_disconnect_invalidates_monitors_before_credentials_are_disabled(connect
     service.disable_monitoring = lambda: events.append('stopped')
     service.disconnect()
     assert events == ['stopped']
+
+
+def test_successful_refresh_removes_obsolete_keychain_slot(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain], tmp_path: Path) -> None:
+    service, google, keychain = connection
+    service.connect(tmp_path / 'client.json', google.email)
+    google.credentials.expiry = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    service.store.save(Connection(google.email, google.credentials))
+    service.status()
+    assert len(keychain.entries) == 1
+    assert 'SECRET-refreshed' in next(iter(keychain.entries.values()))
+
+
+def test_obsolete_slot_cleanup_failure_does_not_break_active_grant(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain], tmp_path: Path) -> None:
+    service, google, keychain = connection
+    service.connect(tmp_path / 'client.json', google.email)
+    keychain.fail_delete = True
+    assert 'Connected Gmail' in service.connect(tmp_path / 'client.json', google.email)
+    assert 'connected' in service.status()
