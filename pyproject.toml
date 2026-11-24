@@ -34,6 +34,7 @@ testpaths = ["tests"]
 
 [tool.mypy]
 python_version = "3.12"
+explicit_package_bases = true
 strict = true
 untyped_calls_exclude = ["google", "google_auth_oauthlib", "keyring.backends.macOS"]
 files = ["gmail", "grievances", "preferences", "conversations", "config", "core", "research", "subscriptions", "telegram_bot", "tests", "manage.py"]

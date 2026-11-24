@@ -34,4 +34,16 @@ class GmailDraftExport(models.Model):
     fingerprint: models.CharField[str, str] = models.CharField(max_length=64)
     status: models.CharField[str, str] = models.CharField(max_length=16, default='pending')
     gmail_id: models.CharField[str, str] = models.CharField(max_length=128, default='')
+    message_id: models.CharField[str, str] = models.CharField(max_length=128, default='')
     created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+
+class GmailReplyCheckState(models.Model):
+    mailbox_record: models.OneToOneField[CaseMailbox, CaseMailbox] = models.OneToOneField(CaseMailbox, on_delete=models.CASCADE)
+    seen_message_ids = models.JSONField(default=list)
+    findings = models.JSONField(default=list)
+    sent_matches = models.JSONField(default=list)
+    last_summary: models.TextField[str, str] = models.TextField(default='')
+    mailbox: models.EmailField[str, str] = models.EmailField(default='')
+    thread_id: models.CharField[str, str] = models.CharField(max_length=128, default='')
+    updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now=True)

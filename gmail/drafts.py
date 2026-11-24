@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from urllib.parse import quote
 
 from asgiref.sync import sync_to_async
 from pydantic import BaseModel, Field
@@ -21,6 +22,7 @@ from gmail.mailbox import Mailbox
 from gmail.models import CaseMailbox, GmailDraftExport
 from gmail.records import CorrespondenceSnapshot, DraftEnvelope
 from gmail.prompts import GMAIL_DRAFT_INSTRUCTIONS
+from gmail.revisions import DraftRevisions
 from grievances.models import ComplaintDraft, CaseResearch, CaseResearchBrief
 from grievances.mutations import CaseMutation
 from grievances.store import CaseView, SelectionView
@@ -55,8 +57,41 @@ class GmailDraftService:
         return list(dict.fromkeys(address.casefold() for _, address in getaddresses([value])
             if re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', address)))
 
+    async def open(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, version: int | None) -> str:
+        rows = GmailDraftExport.objects.filter(draft__case_id=current.id,
+            draft__case__owner_id=turn.owner_id, status='created').select_related('draft')
+        if version is not None:
+            rows = rows.filter(draft__version=version)
+        choices = [row async for row in rows.order_by('-draft__version')[:2]]
+        if not choices:
+            return 'I could not find a saved Gmail draft for this case.'
+        if len(choices) > 1:
+            return f'Which draft version should I open? The latest is v{choices[0].draft.version}.'
+        row = choices[0]
+        try:
+            with self.mailbox() as mailbox, tracing.operation('gmail.open_draft', {'draft_id': row.gmail_id}, private=True) as span:
+                reference = await sync_to_async(mailbox.draft_reference)(row.gmail_id, row.mailbox)
+                tracing.record_output(span, asdict(reference))
+            return await self.save_link(turn, selection, current, row.pk, reference.message_id)
+        except GmailError:
+            return 'I could not verify this draft in Gmail. It may have been changed, sent or deleted; I have not inferred which. Check Gmail Drafts directly.'
+
+    @staticmethod
+    @sync_to_async
+    def save_link(turn: OwnerTurn, selection: SelectionView, current: CaseView, identifier: int, message_id: str) -> str:
+        with CaseMutation(turn, selection, current, operation='read') as mutation:
+            if mutation.failure:
+                return 'The case changed while I was opening the draft. Please try again.'
+            row = GmailDraftExport.objects.filter(pk=identifier, draft__case_id=current.id).select_related('draft').first()
+            if row is None:
+                return 'The local case was deleted. Any Gmail copy is preserved.'
+            row.message_id = message_id
+            row.save(update_fields=['message_id'])
+            return GmailDraftService.describe(row)
+
     async def run(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                  row: CorrespondenceSnapshot, usage: RunUsage, recipient: str = '') -> str:
+                  row: CorrespondenceSnapshot, usage: RunUsage, recipient: str = '',
+                  revision: bool = False, version: int | None = None) -> str:
         prior = await self.replay(turn)
         if prior:
             return prior
@@ -68,8 +103,8 @@ class GmailDraftService:
             choices = self.addresses(recipient)
         else:
             incoming = [message for message in row.messages if self.addresses(message.sender) != [row.mailbox.casefold()]]
-            source = incoming[-1] if incoming else latest
-            choices = self.addresses((source.reply_to or source.sender) if incoming and source else source.recipient if source else '')
+            incoming_source = incoming[-1] if incoming else latest
+            choices = self.addresses((incoming_source.reply_to or incoming_source.sender) if incoming and incoming_source else incoming_source.recipient if incoming_source else '')
         choices = [address for address in choices if address != row.mailbox.casefold()]
         if len(choices) != 1:
             return 'I cannot determine one reply address reliably. Which email address should receive the draft?'
@@ -81,11 +116,17 @@ class GmailDraftService:
         try:
             with self.mailbox() as mailbox:
                 await sync_to_async(mailbox.draft_capability)(row.mailbox)
+            revisions = DraftRevisions(self.mailbox)
+            source = await revisions.read(turn, selection, current, row.mailbox, row.selected_thread, version) if revision else None
+            if source and recipient and DraftRevisions.address(recipient) != DraftRevisions.address(source.envelope.recipient):
+                return 'This revision would change the original recipient. Please request a separate draft for the new recipient.'
             policy = await self.policy_snapshot(turn, current)
             previous = await ComplaintDraft.objects.filter(case_id=current.id, case__owner_id=turn.owner_id).order_by('-version').afirst()
             result = await self.writer.run(json.dumps({'request': {'original_goal': row.pending_goal or turn.text, 'owner_reply': turn.text}, 'facts': current.facts,
                 'reviewed_policy': policy, 'emails': [asdict(item) for item in row.messages], 'truncated': row.truncated,
-                'previous_application_draft': {'version': previous.version, 'subject': previous.subject, 'body': previous.body} if previous else None}), usage=usage,
+                'selected_gmail_draft': {'version': source.version, 'subject': source.envelope.subject,
+                    'body': source.envelope.body, 'threaded': bool(source.envelope.thread_id), 'provenance': 'Current unsent Gmail draft, including manual edits; not sent correspondence or factual evidence.'} if source else None,
+                'previous_application_draft': {'version': previous.version, 'subject': previous.subject, 'body': previous.body} if previous and not source else None}), usage=usage,
                 usage_limits=UsageLimits(request_limit=constants.ASSISTANCE_REQUEST_LIMIT),
                 timeout=constants.ASSISTANCE_TIMEOUT_SECONDS)
             content = result.output
@@ -97,6 +138,11 @@ class GmailDraftService:
                 return 'I could not verify the draft against the emails. No Gmail draft was created.'
             envelope = DraftEnvelope(row.mailbox, target, latest.subject if latest else content.subject,
                 content.body, row.selected_thread, latest.rfc_message_id if latest else '', latest.references if latest else '')
+            if source:
+                if source.envelope.thread_id and content.subject != source.envelope.subject:
+                    return 'Changing the subject would break the existing Gmail conversation. No revision was created; request a separate email if you want a different subject.'
+                envelope = replace(source.envelope, subject=content.subject, body=content.body, marker='')
+                await revisions.validate(source)
             evidence = self.fingerprint([asdict(item) for item in row.messages])
             export_id, ready = await self.reserve(turn, selection, current, envelope, evidence, policy)
             if not ready:
@@ -109,9 +155,13 @@ class GmailDraftService:
             await self.validate_handoff(turn, selection, current, row.selected_thread, evidence)
             if policy != await self.policy_snapshot(turn, current):
                 raise GmailError('The policy evidence changed; no draft was created.')
-            with self.mailbox() as mailbox, tracing.operation('gmail.create_draft', {}, private=True):
-                gmail_id = await sync_to_async(mailbox.create_draft)(envelope)
-            await self.finish(export_id, 'created', gmail_id)
+            if source:
+                await revisions.validate(source)
+                await self.validate_handoff(turn, selection, current, row.selected_thread, evidence)
+            with self.mailbox() as mailbox, tracing.operation('gmail.create_draft', asdict(envelope), private=True) as span:
+                reference = await sync_to_async(mailbox.create_draft)(envelope)
+                tracing.record_output(span, asdict(reference))
+            await self.finish(export_id, 'created', reference.draft_id, reference.message_id)
             await self.clear_pending(turn, selection, current)
             return await self.result(export_id)
         except DraftOutcomeUnknown as error:
@@ -133,8 +183,10 @@ class GmailDraftService:
     @staticmethod
     def describe(row: GmailDraftExport) -> str:
         if row.status == 'created':
+            link = f'https://mail.google.com/mail/?authuser={quote(row.mailbox, safe="")}#inbox?compose={row.message_id}' if row.message_id else ''
             return (f'Draft v{row.draft.version} is ready in Gmail for {row.recipient}. Nothing was sent.\n'
-                f'Open Gmail Drafts in {row.mailbox} and look for “{row.draft.subject}”.')
+                + (f'Open draft in Gmail (web):\n{link}\n' if link else '')
+                + f'{"If the link does not open it, open" if link else "Open"} Gmail Drafts in {row.mailbox} and look for “{row.draft.subject}”.')
         if row.status == 'failed':
             return 'Gmail did not create this draft. Check the connection or permission before requesting it again.'
         return 'Draft creation is unconfirmed. Check Gmail Drafts before retrying; I will not create another copy automatically.'
@@ -161,7 +213,8 @@ class GmailDraftService:
                 fact_revision=current.revision, operation=receipt, subject=envelope.subject, body=envelope.body,
                 kind='follow_up' if envelope.thread_id else 'initial', progress_revision=current.progress_revision,
                 evidence_revision=policy.get('revision'))
-            export = GmailDraftExport.objects.create(draft=draft, mailbox=envelope.mailbox, recipient=envelope.recipient,
+            export = GmailDraftExport.objects.create(draft=draft, mailbox=envelope.mailbox,
+                recipient=DraftRevisions.address(envelope.recipient),
                 thread_id=envelope.thread_id, fingerprint=fingerprint)
             return export.pk, True
 
@@ -181,8 +234,8 @@ class GmailDraftService:
 
     @staticmethod
     @sync_to_async
-    def finish(identifier: int, status: str, gmail_id: str = '') -> None:
-        GmailDraftExport.objects.filter(pk=identifier).update(status=status, gmail_id=gmail_id)
+    def finish(identifier: int, status: str, gmail_id: str = '', message_id: str = '') -> None:
+        GmailDraftExport.objects.filter(pk=identifier).update(status=status, gmail_id=gmail_id, message_id=message_id)
 
     @staticmethod
     @sync_to_async
@@ -207,10 +260,11 @@ class GmailDraftService:
         row = await GmailDraftExport.objects.filter(pk=identifier, status__in=['pending', 'uncertain']).afirst()
         if row is None:
             return
-        with self.mailbox() as mailbox, tracing.operation('gmail.reconcile_draft', {}, private=True):
+        with self.mailbox() as mailbox, tracing.operation('gmail.reconcile_draft', {'export_id': identifier}, private=True) as span:
             found = await sync_to_async(mailbox.find_export)(row.mailbox, await self.marker(identifier))
+            tracing.record_output(span, {'match': asdict(found) if found else None})
         if found:
-            await self.finish(identifier, 'created', found)
+            await self.finish(identifier, 'created', found.draft_id, found.message_id)
 
     @staticmethod
     @sync_to_async

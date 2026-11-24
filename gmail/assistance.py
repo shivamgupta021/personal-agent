@@ -62,18 +62,27 @@ class CaseAssistance:
                 return 'The case changed while I was working. Please try again.'
             selection = refreshed
         current = target
+        if action.gmail_revision and action.facts:
+            saved = await self.store.apply(turn.followup().followup(), IntakeAction(action='update',
+                case_id=current.id, facts=action.facts, correction_quote=action.correction_quote), selection, current)
+            refreshed_case = await self.store.get_case(turn.owner_id, current.id)
+            if refreshed_case is None or any(refreshed_case.facts.get(f.key) != f.value for f in action.facts):
+                return saved
+            current = refreshed_case
         if not await self.correspondence.consented(turn.owner_id):
             await self.correspondence.remember_goal(turn, selection, current)
             return await self.correspondence.run(turn, 'gmail_search', selection, current)
         return await self.correspondence.assist(turn, selection, current, usage, self,
-            draft=action.gmail_draft, recipient=action.gmail_recipient)
+            draft=action.gmail_draft or action.gmail_revision, recipient=action.gmail_recipient,
+            revision=action.gmail_revision, version=action.draft_version)
 
     async def draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                    row: CorrespondenceSnapshot, usage: RunUsage, recipient: str) -> str:
+                    row: CorrespondenceSnapshot, usage: RunUsage, recipient: str,
+                    revision: bool = False, version: int | None = None) -> str:
         if self.correspondence.mailbox is None:
             return 'Gmail is unavailable. Please check the connection.'
         answer = await GmailDraftService(self.model, self.correspondence.mailbox).run(
-            turn, selection, current, row, usage, recipient)
+            turn, selection, current, row, usage, recipient, revision=revision, version=version)
         if answer.rstrip().endswith('?'):
             await self.correspondence.remember_goal(turn, selection, current, answer, recipient)
         return answer

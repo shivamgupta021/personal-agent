@@ -234,3 +234,23 @@ or follow_up for these Gmail requests. gmail_recipient is only an email address 
 supplied in current_request. A reply to mail_pending.question continues mail_pending.goal;
 retain gmail_draft=true when that goal is drafting. Never send email.
 """
+
+INTAKE_INSTRUCTIONS += """
+For changes to an existing Gmail draft ('revise it', 'make that draft firmer', 'shorten v2'),
+set gmail_revision=true as well as gmail_draft=true. Use draft_version when the owner specifies
+one or unambiguously refers to the version in the prior reply. Never guess between multiple
+versions; leave draft_version empty to ask. Continue gmail_revision=true when answering a
+revision clarification in mail_pending. A new complaint/reply is not automatically a revision.
+"""
+
+INTAKE_INSTRUCTIONS += """
+Explicit requests to check whether the company replied or check responses use gmail_check_replies
+with the intended case_id. If the intended case is unknown, clarify. Checking replies does not
+create or send drafts, enable monitoring, or authorize cancellation of anything.
+"""
+
+INTAKE_INSTRUCTIONS += """
+For opening or viewing an existing Gmail draft, use gmail_open_draft with the selected case_id
+and draft_version when identified. 'Latest' means the highest supplied draft_versions value.
+Do not create a new draft for an open/view request or paste its body into Telegram.
+"""

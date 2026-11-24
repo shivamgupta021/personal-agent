@@ -1,0 +1,5 @@
+"""Bounds for explicit selected-thread reply checks."""
+MAX_REPLY_FINDINGS = 20
+MAX_REPLY_SUMMARY_CHARS = 800
+MAX_REPLY_QUOTE_CHARS = 1000
+MAX_SEEN_MESSAGES = 2000

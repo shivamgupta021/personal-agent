@@ -14,8 +14,8 @@ from conversations.store import ConversationStore
 from grievances.service import ApplicationService, SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
 from grievances.progress_store import ProgressStore
-from test_progress import ProgressConversation
-from test_policy import PolicyConversation
+from tests.grievances.test_progress import ProgressConversation
+from tests.grievances.test_policy import PolicyConversation
 from grievances.policy_fixtures import PolicyFixtures
 from grievances.policy_store import PolicyStore
 from research.tools.firecrawl import Firecrawl

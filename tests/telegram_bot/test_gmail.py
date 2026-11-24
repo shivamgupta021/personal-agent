@@ -508,14 +508,14 @@ class DraftHarness(AssistanceHarness):
             self.created.append(json.loads(request.content))
             if self.uncertain:
                 raise httpx2.ReadTimeout('synthetic timeout')
-            return httpx2.Response(200, json={'id': 'draft123', 'message': {'id': 'm123'}})
+            return httpx2.Response(200, json={'id': 'draft123', 'message': {'id': 'abc123'}})
         if request.url.path.endswith('/drafts') and self.recovery_failure:
             return httpx2.Response(503, json={})
         if request.url.path.endswith('/drafts'):
             return httpx2.Response(200, json={'drafts': [{'id': 'recoveredDraft'}] if self.recoverable else []})
         if request.url.path.endswith('/drafts/recoveredDraft'):
             mail = BytesParser().parsebytes(base64.urlsafe_b64decode(self.created[0]['message']['raw']))
-            return httpx2.Response(200, json={'message': {'payload': {'headers': [{'name': 'X-Personal-Agent-Export', 'value': str(mail['X-Personal-Agent-Export']).strip()}]}}})
+            return httpx2.Response(200, json={'id': 'recoveredDraft', 'message': {'id': 'abc123', 'payload': {'headers': [{'name': 'X-Personal-Agent-Export', 'value': str(mail['X-Personal-Agent-Export']).strip()}]}}})
         response = super().google(request)
         if '/threads/' in request.url.path and response.status_code == 200:
             value = response.json()
@@ -565,6 +565,7 @@ def test_draft_request_creates_only_unsent_gmail_draft_and_handles_uncertainty(t
             assert len(harness.created) == 1
         else:
             assert 'Draft v1' in answer and 'Nothing was sent' in answer
+            assert 'https://mail.google.com/mail/?authuser=owner%40example.com#inbox?compose=abc123' in answer
             await harness.send('Draft a firmer reply in Gmail')
             assert len(harness.created) == 2  # New version, never overwrite the previous Gmail draft.
     try:
@@ -628,4 +629,35 @@ def test_failed_recovery_keeps_uncertain_draft_guard(tmp_path: Path) -> None:
     try:
         asyncio.run(run())
     finally:
+        harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('enabled,endpoint,visible', [(True, 'http://127.0.0.1:3000', True),
+    (False, 'http://127.0.0.1:3000', False), (True, 'https://cloud.langfuse.com', False)])
+def test_email_debug_capture_is_explicit_and_local(tmp_path: Path, enabled: bool, endpoint: str, visible: bool) -> None:
+    harness = AssistanceHarness(tmp_path)
+    exporter = InMemorySpanExporter()
+    async def run() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+    try:
+        with override_settings(LANGFUSE_CAPTURE_CONTENT=True, LANGFUSE_CAPTURE_PRIVATE_CONTENT=True,
+                LANGFUSE_CAPTURE_EMAIL_CONTENT=enabled, LANGFUSE_BASE_URL=endpoint):
+            tracing.shutdown()
+            tracing.configure(exporter)
+            asyncio.run(run())
+            tracing.flush()
+            spans = exporter.get_finished_spans()
+            payloads = '\n'.join(span.to_json() for span in spans)
+            assert ('PRIVATE-BODY' in payloads) is visible
+            assert ('email privacy' in payloads) is not visible
+            assert 'SECRET-access' not in payloads and 'SECRET-refresh' not in payloads
+            read = next(span for span in spans if span.name == 'gmail.read_thread')
+            assert read.attributes is not None
+            if visible:
+                assert 'thread_id' in str(read.attributes['langfuse.observation.input'])
+                assert 'PRIVATE-BODY' in str(read.attributes['langfuse.observation.output'])
+    finally:
+        tracing.shutdown()
         harness.http.close()

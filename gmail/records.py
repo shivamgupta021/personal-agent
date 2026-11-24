@@ -3,6 +3,12 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class DraftReference:
+    draft_id: str
+    message_id: str = ''
+
+
+@dataclass(frozen=True)
 class Candidate:
     thread_id: str
     message_id: str
@@ -22,6 +28,7 @@ class ImportedMessage:
     date: str
     text: str
     unread_attachments: bool
+    labels: tuple[str, ...] = ()
     recipient: str = ''
     reply_to: str = ''
     rfc_message_id: str = ''

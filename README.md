@@ -10,26 +10,39 @@ A local Django project with a real research agent using your ChatGPT subscriptio
 | Grievance facts, reviewed public-policy research, local draft versions and manual progress | Implemented; legacy command-shaped administrative responses still exist |
 | Natural Gmail help: identify the case, plan searches, choose an unambiguous thread, refresh it and summarize evidence | Live Telegram checked; no candidate-reference commands needed |
 | Unsent Gmail drafts | Implemented; synthetic real-model experiment and live Telegram → unsent Gmail draft acceptance passed (#45) |
-| Revisions preserving manual Gmail edits | Not completed (#46); new drafts preserve previous Gmail copies, but application context cannot see manual edits yet |
-| Verified sent-state/reply checks, background monitoring, reminders | Not completed (#47–#49) |
+| Revisions preserving manual Gmail edits | Implemented (#46); reads the selected Gmail draft and creates a new version; live acceptance recorded below |
+| On-demand reply and sent-state checks | Implemented (#47); selected thread only, separate verified and owner-reported status |
+| Background monitoring and reminders | Not implemented (#48–#49) |
 
 Test the user experience in the private Telegram bot, not with internal candidate IDs:
 
 1. **“Help me get my Hosteller refund.”** Expect an email-based summary, uncertainty where appropriate, and a short next step. It should find/select the case itself.
 2. **“What about my licence approval?”** Expect a switch to that case and its own correspondence, without mixing the two cases.
-3. **“Draft a reply in Gmail asking them what happens next.”** With compose permission, expect a recipient/version confirmation and Gmail mailbox/subject locator, not a full draft in Telegram. With read-only permission, expect an honest permission message and no draft.
+3. **“Draft a reply in Gmail asking them what happens next.”** With compose permission, expect a recipient/version confirmation and specific-draft web link and mailbox/subject fallback, not a full draft in Telegram. With read-only permission, expect an honest permission message and no draft.
 4. **“For this comparison, my two languages are Python and Ruby. Acknowledge without searching.”** Then **“Which two languages?”** Expect Python and Ruby, without forcing grievance handling.
 
-Real email traces deliberately show `{"omitted":"email privacy"}` while retaining stages and timing. To inspect readable content, use the synthetic Langfuse experiments. Neither fixture-based experiment accesses the real inbox:
+By default, real email traces show `{"omitted":"email privacy"}` while retaining stages and timing. For local development, set `LANGFUSE_CAPTURE_CONTENT=true`, `LANGFUSE_CAPTURE_PRIVATE_CONTENT=true`, and `LANGFUSE_CAPTURE_EMAIL_CONTENT=true` in `.env`, then restart the bot. The email opt-in is honored only for loopback Langfuse endpoints (`localhost`, `127.0.0.1`, `::1`). It records real prompts, answers and Gmail operation payloads in local Langfuse; credentials are never passed to tracing. Existing omitted traces cannot be reconstructed. To inspect readable content, use the synthetic Langfuse experiments. These fixture-based experiments do not access the real inbox:
 
 ```sh
 uv run python manage.py evaluate_gmail
 uv run python manage.py evaluate_gmail --drafts
+uv run python manage.py evaluate_gmail --revisions
+uv run python manage.py evaluate_gmail_replies
 ```
 
-Both use the real subscription model with synthetic Gmail responses, publish a Langfuse experiment, and return its URL. Boolean checks verify the flow; inspect the synthetic answer and MIME draft for semantic quality too.
+These use the real subscription model with synthetic Gmail responses, publish a Langfuse experiment, and return its URL. Boolean checks verify the flow; inspect the synthetic answer and MIME draft for semantic quality too.
 
 Draft authorization is a one-time desktop setup: `uv run python manage.py gmail_connect --email YOUR_ADDRESS --compose`. Google’s compose scope includes sending permission; this app exposes only draft creation, never send. Failed authorization preserves the existing connection. Draft creation records intent first; uncertain outcomes are never blindly retried. A later request can recover a positively matched draft using its export marker, but an inconclusive bounded lookup remains unresolved and requires inspection.
+
+### Gmail review workflow
+
+- “Open my latest Hosteller draft in Gmail.” Refreshes the current message identity and returns a link; creates nothing.
+- “Make draft v1 shorter, keeping the request for booking-specific records.” Reads that exact Gmail draft, including manual edits, and creates a new version. Existing drafts are preserved. If several versions are possible, it asks which one.
+- “Did Hosteller reply? Check my email.” Reads the selected thread, summarizes new received replies, and distinguishes acknowledgements from substantive answers. Repeat checks do not count the same message as new.
+
+A Gmail web link uses the message ID returned by Google, not the draft container ID. The compose link was verified in Chrome against the exact Hosteller draft. Gmail does not document it as an API permalink contract; native-mobile behavior is not guaranteed. Mailbox/subject fallback is always retained. Opening an existing draft refreshes its message ID because manual edits may replace that ID. Sending or deleting it may make a previously returned link stale.
+
+Revision limits: attachments, Cc/Bcc, HTML-only or oversized draft content stop the revision rather than silently dropping content. Sending remains unavailable. Missing drafts do not prove sending; verification requires matching SENT mail, while owner-reported sending remains a separate source.
 
 ## Run locally
 
@@ -742,3 +755,14 @@ filters are preserved outside each alternative; complex Boolean expressions are
 interpreted by the model and should be reviewed in synthetic evaluations. Search still
 uses Google's official `users.messages.list(q=...)` and metadata reads; only an
 explicitly selected thread uses `users.threads.get(format=full)`.
+
+### Gmail workflow acceptance — 23 November 2026
+
+Deep-link, revision (#46), and on-demand reply-check (#47) acceptance:
+
+- Full regression suite: 291 tests passed. The subsequent recipient-normalization fix passed all 23 focused revision/reply tests. Strict typechecking passed (211 files).
+- Real-model synthetic experiments: [revisions, 3/3](http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/experiments/results?baseline=9db4d893825ce6b4) and [reply checks, 3/3](http://127.0.0.1:3000/project/cmwlnbvg00007ro3rd5obwpcu/experiments/results?baseline=92916c0ff3c29a08). Revision checks retained a manual reference and written-response preference; reply checks covered substantive, acknowledgement, uncertain and repeated-check behavior. These are bounded development checks, not a general quality guarantee.
+- Live Telegram “open my latest draft” returned the exact verified Gmail compose link: [trace, 4.8 seconds](http://localhost:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/6119abf8697c0fb4531e4e33acae8111).
+- Live revision created a separate unsent v2, preserved v1 byte-for-byte at the decoded-envelope boundary, kept recipient/thread, and reduced body length from 828 to 563 characters. Its link opened the actual v2 editor. [Trace, 75.2 seconds](http://localhost:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/e65f6bad62903a8c266728178e040e8e): 61 seconds were in initial model routing; latency remains a limitation.
+- Live selected-thread reply check returned no newly received messages, summarized the latest company reply, and disclosed partial retrieval and unread attachments. It did not claim sending or resolution. [Trace, 14.2 seconds](http://localhost:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/6758cb2a55be247b9fd6fbdf205880c3).
+- Real-email trace payloads use explicit email-privacy omission indicators. No email was sent, no existing Gmail draft was overwritten, and monitoring remains off. Positive SENT matching is covered with controlled data; no real email was sent merely to test it.
