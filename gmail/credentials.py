@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 import json
+import logging
 import os
 from pathlib import Path
 import sys
@@ -13,6 +14,8 @@ from keyring.backends.macOS import Keyring
 
 from gmail.constants import KEYCHAIN_SERVICE
 from gmail.errors import GmailError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,6 +67,13 @@ class KeychainStore:
             os.replace(temporary, self.pointer)
         finally:
             temporary.unlink(missing_ok=True)
+        # Activation is committed. Remove the obsolete token copy without risking the new grant.
+        previous = self.account + ':' + ('0' if slot == '1' else '1')
+        try:
+            if self.backend.get_password(KEYCHAIN_SERVICE, previous) is not None:
+                self.backend.delete_password(KEYCHAIN_SERVICE, previous)
+        except Exception:
+            logger.warning('Gmail connection saved; obsolete Keychain slot cleanup failed. Retry disconnect if removing access.')
 
     def disable(self) -> None:
         self.pointer.unlink(missing_ok=True)
