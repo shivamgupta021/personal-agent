@@ -163,6 +163,8 @@ class MailHarness:
 
     def google(self, request: httpx2.Request) -> httpx2.Response:
         assert request.method == 'GET'
+        if '/attachments/' in request.url.path:
+            return httpx2.Response(404)  # Deliberately unreadable evidence fixture.
         if request.url.path.endswith('/messages'):
             self.searches += 1
             assert 'Kettle' in request.url.params['q']

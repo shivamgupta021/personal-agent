@@ -38,12 +38,12 @@ class ApplicationTurn:
             if epoch != await self.ownership.epoch(turn.owner_id):
                 text = 'This delivery predates case deletion; nothing was recreated. Please send a new request.'
             else:
-                tracing.record_input(span, {'message': turn.text})
+                tracing.record_input(span, {'message': turn.text, **({'attachments': [{'name': item.name, 'mime': item.mime, 'bytes': len(item.data)} for item in turn.uploads]} if turn.uploads else {})})
                 control = await self.deletion.control(turn)
                 if control is None:
-                    if PreferenceInspection.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
+                    if not turn.uploads and PreferenceInspection.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
                         text = await PreferenceInspection().run(turn)
-                    elif CapabilityHelp.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
+                    elif not turn.uploads and CapabilityHelp.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
                         text = await CapabilityHelp().run(turn)
                     else:
                         text = await execute(turn, epoch)

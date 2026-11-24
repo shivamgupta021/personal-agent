@@ -45,7 +45,7 @@ class MonitoringMailbox(Mailbox):
         if not self.account_valid:
             raise GmailError('Disconnected')
 
-    def thread(self, thread_id: str, expected_mailbox: str) -> MailResult[ImportedMessage]:
+    def thread(self, thread_id: str, expected_mailbox: str, previous: list[ImportedMessage] | None = None) -> MailResult[ImportedMessage]:
         self.verify_account(expected_mailbox)
         self.reads += 1
         self.during_read()

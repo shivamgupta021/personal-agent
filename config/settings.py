@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     'research.apps.ResearchConfig',
     'telegram_bot.apps.TelegramBotConfig',
     'gmail',
+    'attachments.apps.AttachmentsConfig',
 ]
 ROOT_URLCONF = 'config.urls'
 WSGI_APPLICATION = 'config.wsgi.application'

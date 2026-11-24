@@ -12,6 +12,7 @@ dependencies = [
     "openai==3.52.0",
     "opentelemetry-exporter-otlp-proto-http==1.45.2",
     "opentelemetry-sdk==1.45.2",
+    "pillow>=12.0,<13",
     "psycopg[binary]>=3.2,<4",
     "pydantic-ai-harness==0.69.0",
     "pydantic-ai-slim[openai]==2.69.0",
@@ -37,7 +38,7 @@ python_version = "3.12"
 explicit_package_bases = true
 strict = true
 untyped_calls_exclude = ["google", "google_auth_oauthlib", "keyring.backends.macOS"]
-files = ["gmail", "grievances", "preferences", "conversations", "config", "core", "research", "subscriptions", "telegram_bot", "tests", "manage.py"]
+files = ["attachments", "gmail", "grievances", "preferences", "conversations", "config", "core", "research", "subscriptions", "telegram_bot", "tests", "manage.py"]
 
 [[tool.mypy.overrides]]
 module = ["google.*", "google_auth_oauthlib.*"]

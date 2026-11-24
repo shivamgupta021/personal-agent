@@ -10,6 +10,7 @@ from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, Usage
 from pydantic_ai.models import Model
 
 from gmail.assistance import CaseAssistance
+from attachments.reader import AttachmentReader
 from gmail.onboarding import GmailConnectionRequested, ConnectionAttempt
 from gmail.drafts import GmailDraftService
 from gmail.correspondence import Correspondence, CONSENT_MESSAGE
@@ -74,6 +75,8 @@ class ApplicationService:
             raise
 
     async def _run(self, turn: OwnerTurn, epoch: int) -> str:
+        if turn.uploads:
+            return await AttachmentReader(self.model).run(turn, epoch)
         if turn.text.strip().rstrip('.!').casefold() == 'i agree to email processing':
             accepted = await self.correspondence.accept(turn.owner_id)
             pending = await self.correspondence.pending_goal(turn)
@@ -88,6 +91,8 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
+        if action.action == 'read_attachment':
+            return await AttachmentReader(self.model).run(turn, epoch)
         if action.action == 'gmail_connect':
             if (not action.gmail_account or action.gmail_account not in turn.text
                     or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', action.gmail_account)

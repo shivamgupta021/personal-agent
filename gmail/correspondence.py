@@ -15,6 +15,7 @@ from pydantic_ai.usage import RunUsage
 
 from core.turns import OwnerTurn
 from core.tracing import tracing
+from core.workers import drain_on_cancel
 from gmail import constants
 from gmail.errors import GmailError, GmailDisconnected
 from gmail.mailbox import Mailbox
@@ -96,7 +97,7 @@ class Correspondence:
                 if row.selected_thread == match.thread_id:
                     return self._render_selected(row)
                 with self.mailbox() as mailbox, tracing.operation('gmail.read_thread', {'thread_id': match.thread_id}, private=True) as span:
-                    thread_result = await sync_to_async(mailbox.thread)(match.thread_id, row.mailbox)
+                    thread_result = await drain_on_cancel(sync_to_async(mailbox.thread)(match.thread_id, row.mailbox))
                     tracing.record_output(span, asdict(thread_result))
                     span.set_attribute('gmail.messages', len(thread_result.items))
                     span.set_attribute('gmail.truncated', thread_result.truncated)
@@ -157,7 +158,7 @@ class Correspondence:
                 if self.mailbox is None:
                     raise GmailError('Gmail is unavailable')
                 with self.mailbox() as mailbox, tracing.operation('gmail.refresh_thread', {'thread_id': row.selected_thread}, private=True) as span:
-                    fresh = await sync_to_async(mailbox.thread)(row.selected_thread, row.mailbox)
+                    fresh = await drain_on_cancel(sync_to_async(mailbox.thread)(row.selected_thread, row.mailbox, row.messages))
                     tracing.record_output(span, asdict(fresh))
                     span.set_attribute('gmail.messages', len(fresh.items))
                     span.set_attribute('gmail.truncated', fresh.truncated)
@@ -185,7 +186,7 @@ class Correspondence:
                     raise GmailError('Gmail is unavailable')
                 await self._snapshot(turn, selection, current)
                 with self.mailbox() as mailbox, tracing.operation('gmail.read_thread', {'thread_id': candidate.thread_id}, private=True) as span:
-                    result = await sync_to_async(mailbox.thread)(candidate.thread_id, row.mailbox)
+                    result = await drain_on_cancel(sync_to_async(mailbox.thread)(candidate.thread_id, row.mailbox))
                     tracing.record_output(span, asdict(result))
                     span.set_attribute('gmail.messages', len(result.items))
                     span.set_attribute('gmail.truncated', result.truncated)
@@ -194,7 +195,7 @@ class Correspondence:
             if draft:
                 return await assistant.draft(turn, selection, current, replace(row, pending_goal=goal), usage, recipient, revision=revision, version=version)
             answer = await assistant.explain(request, current,
-                [asdict(message) for message in row.messages], row.truncated, usage)
+                [message.evidence() for message in row.messages], row.truncated, usage)
             await self._snapshot(turn, selection, current)
             return answer
         except GmailDisconnected:
