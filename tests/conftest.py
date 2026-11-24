@@ -1,17 +1,9 @@
 import asyncio
-import os
 from collections.abc import Iterator
 
 import pytest
 from asgiref.sync import sync_to_async
 from django.db import connections
-
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-
-# Controlled tests never export synthetic test spans to the live project.
-os.environ['LANGFUSE_PUBLIC_KEY'] = ''
-os.environ['LANGFUSE_SECRET_KEY'] = ''
 
 
 @pytest.fixture(autouse=True)

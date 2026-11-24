@@ -23,14 +23,14 @@ class TimeoutAdapter(HTTPAdapter):
 
 
 class GoogleClient:
-    def authorize(self, client_file: Path, expected_email: str) -> Credentials:
+    def authorize(self, client_file: Path, expected_email: str, *, scopes: tuple[str, ...] = constants.SCOPES) -> Credentials:
         configuration = json.loads(client_file.read_text())
         installed = configuration.get('installed', {})
         if ('web' in configuration or installed.get('auth_uri') not in constants.AUTH_URLS
                 or installed.get('token_uri') != constants.TOKEN_URL
                 or not installed.get('client_id') or not installed.get('client_secret')):
             raise GmailError('Provide a Google Desktop OAuth client configuration with official Google endpoints.')
-        flow = InstalledAppFlow.from_client_config({'installed': installed}, scopes=list(constants.SCOPES),
+        flow = InstalledAppFlow.from_client_config({'installed': installed}, scopes=list(scopes),
                                                    autogenerate_code_verifier=True)
         flow.oauth2session.mount('https://', TimeoutAdapter())
         try:

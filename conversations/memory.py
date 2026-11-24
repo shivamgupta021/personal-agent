@@ -1,4 +1,4 @@
-"""Explicit general-memory operations without research or case authority."""
+"""Persistent conversation and explicit memory operations without web or case authority."""
 
 from collections.abc import Awaitable, Callable
 
@@ -35,6 +35,7 @@ class ConversationMemoryRunner:
             instructions=CONVERSATION_INSTRUCTIONS + await preferences.instructions(),
             capabilities=[ConversationCompaction(context, private=True)],
             toolsets=[FunctionToolset(tools=[Tool(preferences.manage_preferences),
-                Tool(forget, name='forget_conversation'), Tool(editor.edit_conversation_fact)])],
+                Tool(forget, name='forget_conversation'), Tool(recall.recall_conversation),
+                Tool(editor.edit_conversation_fact)])],
             usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS, tool_calls_limit=constants.MAX_TOOL_CALLS),
             timeout=constants.RUN_TIMEOUT_SECONDS)

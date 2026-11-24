@@ -67,6 +67,13 @@ class ConversationStore:
             ConversationTrace.objects.filter(identity=identity).update(pending_deletion=True)
 
     @sync_to_async
+    def track_application(self, identity: str, trace_id: str) -> None:
+        """Register routing/preference capture before reading any conversation data."""
+        with transaction.atomic():
+            ConversationRecord.objects.select_for_update().get_or_create(identity=identity)
+            ConversationTrace.objects.get_or_create(identity=identity, trace_id=trace_id)
+
+    @sync_to_async
     def track(self, identity: str, trace_id: str, context: ConversationContext) -> None:
         with transaction.atomic():
             record = ConversationRecord.objects.select_for_update().filter(identity=identity, pk=context.record_id).first()

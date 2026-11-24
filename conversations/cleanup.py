@@ -18,6 +18,8 @@ class TraceCleanup:
         pending = await self.store.pending(identity)
         if not pending:
             return 'No trace cleanup remains.'
+        if tracing.application_producer_active():
+            return 'Trace cleanup pending until this application turn finishes.'
         if not await asyncio.to_thread(tracing.flush):
             return 'Trace export is still pending. Say “retry trace cleanup” later.'
         failed = False

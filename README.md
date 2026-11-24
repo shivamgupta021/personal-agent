@@ -2,6 +2,35 @@
 
 A local Django project with a real research agent using your ChatGPT subscription, Pydantic AI, and your existing Firecrawl service. Django supplies application startup, settings, logging, and management commands. Owner-only Telegram, persistent conversation memory, preferences, and the refund-first grievance workflow use the same application services. External sending is not available.
 
+## Current checkpoint (23 November 2026)
+
+| Capability | Status |
+| --- | --- |
+| Telegram research with citations; persistent conversation, compaction, recall and explicit preferences | Implemented; regression coverage retained |
+| Grievance facts, reviewed public-policy research, local draft versions and manual progress | Implemented; legacy command-shaped administrative responses still exist |
+| Natural Gmail help: identify the case, plan searches, choose an unambiguous thread, refresh it and summarize evidence | Live Telegram checked; no candidate-reference commands needed |
+| Unsent Gmail drafts | Implemented; synthetic real-model experiment and live Telegram → unsent Gmail draft acceptance passed (#45) |
+| Revisions preserving manual Gmail edits | Not completed (#46); new drafts preserve previous Gmail copies, but application context cannot see manual edits yet |
+| Verified sent-state/reply checks, background monitoring, reminders | Not completed (#47–#49) |
+
+Test the user experience in the private Telegram bot, not with internal candidate IDs:
+
+1. **“Help me get my Hosteller refund.”** Expect an email-based summary, uncertainty where appropriate, and a short next step. It should find/select the case itself.
+2. **“What about my licence approval?”** Expect a switch to that case and its own correspondence, without mixing the two cases.
+3. **“Draft a reply in Gmail asking them what happens next.”** With compose permission, expect a recipient/version confirmation and Gmail mailbox/subject locator, not a full draft in Telegram. With read-only permission, expect an honest permission message and no draft.
+4. **“For this comparison, my two languages are Python and Ruby. Acknowledge without searching.”** Then **“Which two languages?”** Expect Python and Ruby, without forcing grievance handling.
+
+Real email traces deliberately show `{"omitted":"email privacy"}` while retaining stages and timing. To inspect readable content, use the synthetic Langfuse experiments. Neither fixture-based experiment accesses the real inbox:
+
+```sh
+uv run python manage.py evaluate_gmail
+uv run python manage.py evaluate_gmail --drafts
+```
+
+Both use the real subscription model with synthetic Gmail responses, publish a Langfuse experiment, and return its URL. Boolean checks verify the flow; inspect the synthetic answer and MIME draft for semantic quality too.
+
+Draft authorization is a one-time desktop setup: `uv run python manage.py gmail_connect --email YOUR_ADDRESS --compose`. Google’s compose scope includes sending permission; this app exposes only draft creation, never send. Failed authorization preserves the existing connection. Draft creation records intent first; uncertain outcomes are never blindly retried. A later request can recover a positively matched draft using its export marker, but an inconclusive bounded lookup remains unresolved and requires inspection.
+
 ## Run locally
 
 ```sh
@@ -382,7 +411,7 @@ Cases, messages, fact revisions and selection survive restart. Duplicate Telegra
 IDs cannot repeat saved case actions. Reusing a case label does not silently create another
 case or overwrite its facts. This intake milestone does not send complaints or resolve cases.
 
-Private case agent spans omit content even when public research content capture is enabled.
+Private case agent spans omit content unless both `LANGFUSE_CAPTURE_CONTENT=true` and `LANGFUSE_CAPTURE_PRIVATE_CONTENT=true` are enabled.
 Use the native synthetic intake experiment to inspect extracted proposals and saved facts:
 
 ```sh
@@ -590,9 +619,17 @@ Its local record is `supplementary-final.json` in the same evidence bundle.
 - Company-source quotations are evidence for review, not a guarantee of refund eligibility.
   Missing purchase-time terms and conflicting policies remain uncertain. Some low-value
   site navigation/status text can still appear in research notes.
-- Private case traces retain timing, usage, message structure and tool schemas, but omit raw
-  case text even when public-research content capture is enabled. Empty private previews
-  therefore do not mean the case tools returned empty results.
+- Private conversation/case traces omit payloads by default. For local debugging, enable
+  both `LANGFUSE_CAPTURE_CONTENT=true` and `LANGFUSE_CAPTURE_PRIVATE_CONTENT=true`
+  in `.env`, then restart the bot. This stores conversation history, saved preferences,
+  case context and generated text in the configured Langfuse instance. The application
+  root shows the current message and prepared reply; model spans show their actual context.
+  Old traces cannot recover content that was never recorded.
+  Application turns use independent root traces so an enclosing experiment cannot
+  recreate their deleted spans when it finishes. Ambient trace/span IDs remain as
+  navigation metadata; [Langfuse currently ignores OpenTelemetry span links](https://langfuse.com/faq/all/opentelemetry-logs-metrics-span-links).
+  Callers must keep private request/response content out of their own enclosing spans:
+  independently captured caller content is outside application trace cleanup.
 - This assistant prepares drafts and records your reports. It does not send complaints,
   contact a company, attach documents, book anything or make payments.
 
@@ -639,3 +676,69 @@ Controlled checks: `uv run pytest -q tests/gmail`. These test the real OAuth par
 with synthetic callbacks and HTTP responses; they do not replace the later live consent check.
 See [Gmail design](docs/specs/gmail-case-integration.md) and
 [primary-source research](docs/research/gmail-integration.md) for the staged plan and scope limits.
+
+### Integrated application routing regression
+
+The Telegram application router is an additional boundary in front of conversation and
+research services. Service-level conversation experiments alone do not validate that boundary.
+Run `uv run python manage.py evaluate_routing` to publish a real-model Langfuse experiment
+covering the original Python/Ruby acknowledgement and follow-up regression, archive recall,
+conversation while a case is selected, preference save/list/forget, public routing, and ambiguous
+case requests. Each turn reconstructs the application service; public web is a controlled boundary
+and still needs a separate live Firecrawl check. Review the experiment answers and proposals,
+not only its coarse scores. Synthetic case state is separate from the Telegram owner's state.
+
+Ordinary chat now uses the persistent no-web conversation runner; it does not require a case
+or silently deselect an existing one. The `application.turn` trace groups routing and conversation
+work, and `case.intake` metadata records `application.route`. Private content remains excluded.
+
+### Gmail case correspondence (#44)
+
+With Gmail connected, use the private Telegram chat:
+
+1. Select an existing grievance case. The dedicated Gmail planner uses its label and saved company/order reference.
+2. Say **I agree to email processing** once. Selected correspondence may be used by
+   the configured model provider in case workflows; execution is not local-only.
+3. Ask **Search Gmail for this case**. Optional Gmail constraints can be stated in
+   the same request. The planner generates up to three related Gmail API queries, then the app shows at most
+   five candidate threads. Broader alternatives run only when the preceding search is empty. Full messages are not read during planning.
+4. Say **Select Gmail candidate REFERENCE**, using the displayed reference. Only
+   then is the full thread requested. Imported plain text is bounded; attachments,
+   remote images and HTML are not read. Truncation is reported.
+5. Ask **Show selected Gmail correspondence** to inspect saved text with mailbox,
+   thread and message references. The selection survives restarts. It is case evidence,
+   not confirmed case facts or a preference, and does not enable monitoring.
+
+After email processing is enabled, application-turn traces for that owner retain
+operation/status/usage metadata and explicit `email privacy` omission markers,
+regardless of either content-debug switch. This conservative rule also covers later
+turns that might quote email; it does not imply empty search results. Synthetic
+experiments have readable fixture/result wrapper spans; inner application payloads
+remain suppressed. No real inbox content is included in evaluation datasets.
+
+`uv run python manage.py evaluate_gmail` reruns the real-model Langfuse dataset
+against a controlled synthetic Gmail endpoint. It never uses the connected mailbox.
+It checks routing, case query terms, selection and source attribution; inspect actual
+answers in the experiment as well. Gmail drafts, reply checks and monitoring belong
+to the following milestones and are not implemented by #44.
+
+Deleting a case cascades to its stored candidates/imports; it does not delete any
+Gmail message. Disconnecting prevents new reads but preserves imported evidence.
+The owner accepted connection milestone #41 while explicitly deferring its live
+revocation/reconsent check. That check has not been claimed as passed.
+
+
+Gmail query planning is independent of case routing and web research. To inspect a
+plan without searching Gmail:
+
+```sh
+uv run python manage.py plan_gmail_queries "Find emails about my licence approval" --case-label "licence approval"
+```
+
+The planner uses the existing subscription model, has no mailbox/web tools, and shares
+its request budget with the parent turn. It can use spelling variants and broader
+related terms rather than quoting the whole case label. Explicit ungrouped Gmail
+filters are preserved outside each alternative; complex Boolean expressions are
+interpreted by the model and should be reviewed in synthetic evaluations. Search still
+uses Google's official `users.messages.list(q=...)` and metadata reads; only an
+explicitly selected thread uses `users.threads.get(format=full)`.

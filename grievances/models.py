@@ -144,14 +144,17 @@ class CaseOwnerState(models.Model):
 
 
 class CaseTrace(models.Model):
-    """Single-case synthetic capture ownership; survives content deletion."""
+    """Case associations for captured traces; survives content deletion."""
     owner_id: models.CharField[str, str] = models.CharField(max_length=128)
     case_id: models.UUIDField[UUID, UUID] = models.UUIDField()
-    trace_id: models.CharField[str, str] = models.CharField(max_length=32, unique=True)
+    trace_id: models.CharField[str, str] = models.CharField(max_length=32, db_index=True)
     producer_closed: models.BooleanField[bool, bool] = models.BooleanField(default=False)
     pending: models.BooleanField[bool, bool] = models.BooleanField(default=False)
     observed: models.BooleanField[bool, bool] = models.BooleanField(default=False)
     confirmed: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['owner_id', 'case_id', 'trace_id'], name='unique_case_trace_association')]
 
 
 class CaseTurnRegistration(models.Model):

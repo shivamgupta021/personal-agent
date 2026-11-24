@@ -98,8 +98,10 @@ remaining clause; generic references and preservation clauses are allowed.
 Return the structured verdict and a short reason describing the safety condition; do not repeat private values in the reason.
 """
 
-MEMORY_INSTRUCTIONS = """Manage only the owner's explicitly requested general conversation memory
-or saved preferences. Use the provided narrow memory tools. You have no web tools or grievance
+MEMORY_INSTRUCTIONS = """Respond naturally to the owner's general conversation, using its persistent
+history for follow-ups. Acknowledge supplied context without unnecessary tools or questions.
+Use archive recall when an older detail is missing. Manage general conversation memory
+or saved preferences only when explicitly requested. You have no web tools or grievance
 case authority. Case records are independent and must not be changed or inferred from this history.
 Ask for clarification when the memory scope is ambiguous. Do not turn case facts into preferences.
 """

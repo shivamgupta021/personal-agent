@@ -8,7 +8,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from opentelemetry.trace import NoOpTracerProvider, Span, StatusCode
+from opentelemetry.context import Context
+from opentelemetry.trace import Link, NoOpTracerProvider, Span, StatusCode, get_current_span
 
 from django.conf import settings
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -18,8 +19,11 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from pydantic_ai import Agent
 from pydantic_ai.models.instrumented import InstrumentationSettings
 
+from core.email_telemetry import EmailMarker, EmailSafeExporter
+
 logger = logging.getLogger(__name__)
 _private_content: ContextVar[bool] = ContextVar('private_trace_content', default=False)
+_application_producer: ContextVar[bool] = ContextVar('application_trace_producer', default=False)
 
 
 class Tracing:
@@ -44,7 +48,8 @@ class Tracing:
         self._provider = TracerProvider(
             resource=Resource.create({'service.name': 'personal-agent'}), shutdown_on_exit=False,
         )
-        self._provider.add_span_processor(BatchSpanProcessor(exporter))
+        self._provider.add_span_processor(EmailMarker())
+        self._provider.add_span_processor(BatchSpanProcessor(EmailSafeExporter(exporter)))
         Agent.instrument_all(InstrumentationSettings(
             tracer_provider=self._provider,
             include_content=settings.LANGFUSE_CAPTURE_CONTENT,
@@ -55,19 +60,37 @@ class Tracing:
                     'enabled' if settings.LANGFUSE_CAPTURE_CONTENT else 'disabled')
 
     def private_instrumentation(self) -> InstrumentationSettings:
-        """Per-agent privacy policy independent of public debugging configuration."""
+        """Private payloads require both explicit debugging opt-ins."""
         return InstrumentationSettings(tracer_provider=self._provider or NoOpTracerProvider(),
-            include_content=False, include_binary_content=False, include_model_request_parameters=False)
+            include_content=self.capture_private_content(), include_binary_content=False, include_model_request_parameters=False)
+
+    @staticmethod
+    def capture_private_content() -> bool:
+        return bool(settings.LANGFUSE_CAPTURE_CONTENT and settings.LANGFUSE_CAPTURE_PRIVATE_CONTENT)
+
+    @staticmethod
+    def capture_content() -> bool:
+        return settings.LANGFUSE_CAPTURE_CONTENT and (
+            not _private_content.get() or settings.LANGFUSE_CAPTURE_PRIVATE_CONTENT)
 
     @contextmanager
-    def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever', private: bool = False) -> Iterator[Span]:
+    def operation(self, name: str, inputs: dict[str, Any], *, kind: str = 'retriever', private: bool = False, root: bool = False) -> Iterator[Span]:
         provider = self._provider or NoOpTracerProvider()
+        ambient = get_current_span()
+        ambient_context = ambient.get_span_context()
+        links = [Link(ambient_context)] if root and ambient_context.is_valid else []
         with provider.get_tracer('personal-agent.retrieval').start_as_current_span(
-            name, record_exception=False, set_status_on_exception=False,
+            name, context=Context() if root else None, links=links,
+            record_exception=False, set_status_on_exception=False,
             attributes={'langfuse.observation.type': kind},
         ) as span:
+            if links and span.is_recording():
+                # Langfuse ignores OTel links; retain content-free navigation metadata.
+                span.set_attribute('langfuse.observation.metadata.ambient_trace_id', format(ambient_context.trace_id, '032x'))
+                span.set_attribute('langfuse.observation.metadata.ambient_span_id', format(ambient_context.span_id, '016x'))
+                ambient.add_event('application.turn', {'application.trace_id': format(span.get_span_context().trace_id, '032x')})
             token = _private_content.set(private or _private_content.get())
-            if settings.LANGFUSE_CAPTURE_CONTENT and not _private_content.get():
+            if self.capture_content():
                 span.set_attribute('langfuse.observation.input', json.dumps(inputs))
             try:
                 yield span
@@ -78,10 +101,35 @@ class Tracing:
                 _private_content.reset(token)
 
     def record_output(self, span: Span, output: dict[str, Any]) -> None:
-        if settings.LANGFUSE_CAPTURE_CONTENT and not _private_content.get():
+        if self.capture_content():
             span.set_attribute('langfuse.observation.output', json.dumps(output))
         if 'error' in output:
             span.set_status(StatusCode.ERROR)
+
+    @contextmanager
+    def public_content(self) -> Iterator[None]:
+        """Use public capture policy after the application authorizes public research."""
+        token = _private_content.set(False)
+        try:
+            yield
+        finally:
+            _private_content.reset(token)
+
+    @staticmethod
+    def application_producer_active() -> bool:
+        return _application_producer.get()
+
+    @contextmanager
+    def application_producer(self) -> Iterator[None]:
+        token = _application_producer.set(True)
+        try:
+            yield
+        finally:
+            _application_producer.reset(token)
+
+    def record_input(self, span: Span, inputs: dict[str, Any]) -> None:
+        if self.capture_content():
+            span.set_attribute('langfuse.observation.input', json.dumps(inputs))
 
     def flush(self) -> bool:
         if self._provider is not None:

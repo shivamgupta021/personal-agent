@@ -11,6 +11,8 @@ from grievances.constants import DRAFT_MATERIAL_FIELDS, MATERIAL_FIELDS
 from grievances.models import CaseOutcome, CaseFactRevision, CaseMessage, CaseOperationReceipt, CaseSelection, CompanyReply, SentReport, CaseResearch, CaseResearchBrief, ComplaintDraft, GrievanceCase
 from grievances.schema import IntakeAction
 from grievances.ownership import CaseOwnership
+from grievances.mutations import CaseMutation
+from grievances.cleanup import CaseTraceRegistry
 
 
 @dataclass(frozen=True)
@@ -82,7 +84,12 @@ class DraftView:
 class CaseStore:
     @sync_to_async
     def list_cases(self, owner_id: str) -> list[CaseSummary]:
-        return [CaseSummary(str(row.pk), row.label) for row in GrievanceCase.objects.filter(owner_id=owner_id).order_by('created_at')]
+        with transaction.atomic():
+            CaseOwnership.lock(owner_id)
+            cases = list(GrievanceCase.objects.filter(owner_id=owner_id).order_by('created_at'))
+            for case in cases:
+                CaseTraceRegistry.register_current_in_transaction(owner_id, str(case.pk))
+            return [CaseSummary(str(row.pk), row.label) for row in cases]
 
     @sync_to_async
     def selection(self, owner_id: str, conversation_id: str) -> SelectionView:
@@ -167,24 +174,17 @@ class CaseStore:
 
     @sync_to_async
     def apply(self, turn: OwnerTurn, action: IntakeAction, selection: SelectionView, current: CaseView | None) -> str:
-        with transaction.atomic():
-            owner = CaseOwnership.lock(turn.owner_id)
-            if owner.deletion_epoch != selection.deletion_epoch:
+        with CaseMutation(turn, selection, current, operation='apply',
+                          target=action.case_id or selection.case_id) as mutation:
+            if mutation.failure == 'deleted':
                 return 'Case content was deleted while this request was running. Nothing was saved.'
-            selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
-            receipt = CaseOperationReceipt.objects.filter(owner_id=turn.owner_id, conversation_id=turn.conversation_id,
-                                                         delivery_id=turn.delivery_id).first()
-            if receipt:
-                return self._receipt_text(receipt)
-            if selected.revision != selection.revision:
+            if mutation.receipt is not None:
+                return self._receipt_text(mutation.receipt)
+            if mutation.failure == 'selection':
                 return 'Case selection changed while this request was running. Nothing changed; please send it again.'
-            case: GrievanceCase | None = None
-            target = action.case_id or selection.case_id
-            if target:
-                try:
-                    case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=UUID(target)).first()
-                except ValueError:
-                    case = None
+            selected = mutation.selected
+            assert selected is not None
+            case = mutation.case
             if current and (case is None or str(case.pk) != current.id or case.revision != current.revision) and action.action in ('update', 'show'):
                 return 'Case facts changed while this request was running. Nothing changed; please send it again.'
             reply: str
@@ -192,6 +192,7 @@ class CaseStore:
             if action.action == 'create':
                 case, created = GrievanceCase.objects.get_or_create(owner_id=turn.owner_id,
                     label_key=' '.join(action.label.casefold().split()), defaults={'label': action.label})
+                CaseTraceRegistry.register_current_in_transaction(turn.owner_id, str(case.pk))
                 if not created:
                     existing = CaseFactRevision.objects.get(case=case, revision=case.revision).facts
                     if any(existing.get(f.key) != f.value for f in action.facts):
@@ -237,13 +238,11 @@ class CaseStore:
                          'or start a new case using details you provide.')
             else:
                 case = None
-                reply = 'Please create or explicitly select a case, or clarify the case and requested action. Please specify whether to inspect facts or draft a refund email. For official research, review and confirm the public fields and official site first. You can report a sent version, save a company reply, request a follow-up or explicitly record an outcome. External sending is not available.'
+                reply = 'Please clarify which case you mean and what you would like me to do with it.'
             if case is not None and action.action in ('create', 'update', 'show') and outcome != 'existing':
                 CaseMessage.objects.create(case=case, role='user', text=turn.text)
                 CaseMessage.objects.create(case=case, role='assistant', text=reply)
-            CaseOperationReceipt.objects.create(owner_id=turn.owner_id, conversation_id=turn.conversation_id,
-                delivery_id=turn.delivery_id, action=action.action, case_id=case.pk if case else None,
-                revision=case.revision if case else 0, outcome=outcome)
+            mutation.record(action.action, case, outcome=outcome)
             return reply
 
     def _revise(self, case: GrievanceCase, facts: dict[str, str], action: IntakeAction, kind: str) -> None:
@@ -296,14 +295,10 @@ class CaseStore:
 
     @sync_to_async
     def read_drafts(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, version: int | None, *, listing: bool) -> str:
-        with transaction.atomic():
-            owner = CaseOwnership.lock(turn.owner_id)
-            if owner.deletion_epoch != selection.deletion_epoch:
+        with CaseMutation(turn, selection, current, operation='read') as mutation:
+            if mutation.failure == 'deleted':
                 return 'Case content was deleted while this request was running. Nothing was saved.'
-            selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
-            case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=current.id).first()
-            if (selected.revision != selection.revision or str(selected.case_id) != current.id
-                    or case is None or case.revision != current.revision):
+            if mutation.failure:
                 return 'Case state changed while this request was running. Please request the drafts again.'
             drafts = self._draft_views(turn.owner_id, current.id)
             if listing:
@@ -317,19 +312,17 @@ class CaseStore:
 
     @sync_to_async
     def save_draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, content: DraftContent) -> str:
-        with transaction.atomic():
-            owner = CaseOwnership.lock(turn.owner_id)
-            if owner.deletion_epoch != selection.deletion_epoch:
+        with CaseMutation(turn, selection, current, operation='draft') as mutation:
+            if mutation.failure == 'deleted':
                 return 'Case content was deleted while this request was running. Nothing was saved.'
-            selected = CaseSelection.objects.select_for_update().get(owner_id=turn.owner_id, conversation_id=turn.conversation_id)
-            receipt = CaseOperationReceipt.objects.filter(owner_id=turn.owner_id, conversation_id=turn.conversation_id, delivery_id=turn.delivery_id).first()
-            if receipt:
-                return self._receipt_text(receipt)
-            case = GrievanceCase.objects.select_for_update().filter(owner_id=turn.owner_id, pk=current.id).first()
-            if selected.revision != selection.revision or str(selected.case_id) != current.id:
+            if mutation.receipt is not None:
+                return self._receipt_text(mutation.receipt)
+            if mutation.failure == 'selection':
                 return 'Case selection changed while drafting. No draft was saved; please request it again.'
-            if case is None or case.revision != current.revision:
+            if mutation.failure == 'facts':
                 return 'Case facts changed or the case was deleted while drafting. No draft was saved; please request it again.'
+            case = mutation.case
+            assert case is not None
             if case.progress_revision != content.progress_revision:
                 return 'Case progress changed while drafting. No draft was saved; please request it again.'
             evidence = CaseResearch.objects.filter(case=case).order_by('-revision').first()
@@ -341,8 +334,7 @@ class CaseStore:
                 return 'Research evidence changed while drafting. No draft was saved; please request it again.'
             latest = ComplaintDraft.objects.filter(case=case).order_by('-version').first()
             version = latest.version + 1 if latest else 1
-            receipt = CaseOperationReceipt.objects.create(owner_id=turn.owner_id, conversation_id=turn.conversation_id,
-                delivery_id=turn.delivery_id, action='draft', case_id=case.pk, revision=current.revision, outcome='saved')
+            receipt = mutation.record('draft', case)
             row = ComplaintDraft.objects.create(case=case, version=version, fact_revision=current.revision, operation=receipt,
                 subject=content.subject, body=content.body, missing_fields=list(content.missing_fields), evidence_revision=content.evidence_revision, kind=content.kind, reply_ids=list(content.reply_ids),
                 sent_report_ids=list(content.sent_report_ids), progress_revision=content.progress_revision)
