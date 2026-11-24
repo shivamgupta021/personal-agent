@@ -69,8 +69,9 @@ class GmailDraftService:
             return f'Which draft version should I open? The latest is v{choices[0].draft.version}.'
         row = choices[0]
         try:
-            with self.mailbox() as mailbox, tracing.operation('gmail.open_draft', {}, private=True):
+            with self.mailbox() as mailbox, tracing.operation('gmail.open_draft', {'draft_id': row.gmail_id}, private=True) as span:
                 reference = await sync_to_async(mailbox.draft_reference)(row.gmail_id, row.mailbox)
+                tracing.record_output(span, asdict(reference))
             return await self.save_link(turn, selection, current, row.pk, reference.message_id)
         except GmailError:
             return 'I could not verify this draft in Gmail. It may have been changed, sent or deleted; I have not inferred which. Check Gmail Drafts directly.'
@@ -157,8 +158,9 @@ class GmailDraftService:
             if source:
                 await revisions.validate(source)
                 await self.validate_handoff(turn, selection, current, row.selected_thread, evidence)
-            with self.mailbox() as mailbox, tracing.operation('gmail.create_draft', {}, private=True):
+            with self.mailbox() as mailbox, tracing.operation('gmail.create_draft', asdict(envelope), private=True) as span:
                 reference = await sync_to_async(mailbox.create_draft)(envelope)
+                tracing.record_output(span, asdict(reference))
             await self.finish(export_id, 'created', reference.draft_id, reference.message_id)
             await self.clear_pending(turn, selection, current)
             return await self.result(export_id)
@@ -258,8 +260,9 @@ class GmailDraftService:
         row = await GmailDraftExport.objects.filter(pk=identifier, status__in=['pending', 'uncertain']).afirst()
         if row is None:
             return
-        with self.mailbox() as mailbox, tracing.operation('gmail.reconcile_draft', {}, private=True):
+        with self.mailbox() as mailbox, tracing.operation('gmail.reconcile_draft', {'export_id': identifier}, private=True) as span:
             found = await sync_to_async(mailbox.find_export)(row.mailbox, await self.marker(identifier))
+            tracing.record_output(span, {'match': asdict(found) if found else None})
         if found:
             await self.finish(identifier, 'created', found.draft_id, found.message_id)
 

@@ -1,6 +1,9 @@
-"""Export-time email exclusion, including native model spans and exception events."""
+"""Default email exclusion with an explicit local-development capture override."""
 from collections.abc import Sequence
 from contextvars import ContextVar
+from urllib.parse import urlsplit
+
+from django.conf import settings
 
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
@@ -12,8 +15,14 @@ email_private: ContextVar[bool] = ContextVar('email_private', default=False)
 
 class EmailMarker(SpanProcessor):
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
-        if email_private.get():
+        if email_private.get() and not self.local_capture_enabled():
             span.set_attribute('email.content_omitted', True)
+
+    @staticmethod
+    def local_capture_enabled() -> bool:
+        return bool(settings.LANGFUSE_CAPTURE_CONTENT and settings.LANGFUSE_CAPTURE_PRIVATE_CONTENT
+            and settings.LANGFUSE_CAPTURE_EMAIL_CONTENT
+            and urlsplit(settings.LANGFUSE_BASE_URL).hostname in ('localhost', '127.0.0.1', '::1'))
 
 
 class EmailSafeExporter(SpanExporter):

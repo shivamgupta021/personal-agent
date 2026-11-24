@@ -56,6 +56,7 @@ LANGFUSE_PUBLIC_KEY = os.getenv('LANGFUSE_PUBLIC_KEY', '')
 LANGFUSE_SECRET_KEY = os.getenv('LANGFUSE_SECRET_KEY', '')
 LANGFUSE_CAPTURE_CONTENT = os.getenv('LANGFUSE_CAPTURE_CONTENT', 'false').strip().lower() == 'true'
 LANGFUSE_CAPTURE_PRIVATE_CONTENT = os.getenv('LANGFUSE_CAPTURE_PRIVATE_CONTENT', 'false').strip().lower() == 'true'
+LANGFUSE_CAPTURE_EMAIL_CONTENT = os.getenv('LANGFUSE_CAPTURE_EMAIL_CONTENT', 'false').strip().lower() == 'true'
 LANGFUSE_TIMEOUT_SECONDS = 5.0
 
 LOGGING: dict[str, Any] = {

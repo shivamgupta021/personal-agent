@@ -58,6 +58,8 @@ class Tracing:
         ))
         logger.info('Native Pydantic AI tracing enabled; content capture %s',
                     'enabled' if settings.LANGFUSE_CAPTURE_CONTENT else 'disabled')
+        if EmailMarker.local_capture_enabled():
+            logger.info('Local email trace content capture enabled')
 
     def private_instrumentation(self) -> InstrumentationSettings:
         """Private payloads require both explicit debugging opt-ins."""

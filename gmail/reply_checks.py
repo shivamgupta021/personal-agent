@@ -62,8 +62,9 @@ class GmailReplyChecks:
             return 'Please enable email processing before I inspect your correspondence.'
         try:
             snapshot = await self.snapshot(turn, selection, current)
-            with self.mailbox() as mailbox, tracing.operation('gmail.check_replies', {}, private=True) as span:
+            with self.mailbox() as mailbox, tracing.operation('gmail.check_replies', {'thread_id': snapshot.thread_id}, private=True) as span:
                 result = await sync_to_async(mailbox.thread)(snapshot.thread_id, snapshot.mailbox)
+                tracing.record_output(span, asdict(result))
                 span.set_attribute('gmail.messages', len(result.items))
                 span.set_attribute('gmail.truncated', result.truncated)
             if not result.items:

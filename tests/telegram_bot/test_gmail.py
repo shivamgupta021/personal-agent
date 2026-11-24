@@ -630,3 +630,34 @@ def test_failed_recovery_keeps_uncertain_draft_guard(tmp_path: Path) -> None:
         asyncio.run(run())
     finally:
         harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('enabled,endpoint,visible', [(True, 'http://127.0.0.1:3000', True),
+    (False, 'http://127.0.0.1:3000', False), (True, 'https://cloud.langfuse.com', False)])
+def test_email_debug_capture_is_explicit_and_local(tmp_path: Path, enabled: bool, endpoint: str, visible: bool) -> None:
+    harness = AssistanceHarness(tmp_path)
+    exporter = InMemorySpanExporter()
+    async def run() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+    try:
+        with override_settings(LANGFUSE_CAPTURE_CONTENT=True, LANGFUSE_CAPTURE_PRIVATE_CONTENT=True,
+                LANGFUSE_CAPTURE_EMAIL_CONTENT=enabled, LANGFUSE_BASE_URL=endpoint):
+            tracing.shutdown()
+            tracing.configure(exporter)
+            asyncio.run(run())
+            tracing.flush()
+            spans = exporter.get_finished_spans()
+            payloads = '\n'.join(span.to_json() for span in spans)
+            assert ('PRIVATE-BODY' in payloads) is visible
+            assert ('email privacy' in payloads) is not visible
+            assert 'SECRET-access' not in payloads and 'SECRET-refresh' not in payloads
+            read = next(span for span in spans if span.name == 'gmail.read_thread')
+            assert read.attributes is not None
+            if visible:
+                assert 'thread_id' in str(read.attributes['langfuse.observation.input'])
+                assert 'PRIVATE-BODY' in str(read.attributes['langfuse.observation.output'])
+    finally:
+        tracing.shutdown()
+        harness.http.close()

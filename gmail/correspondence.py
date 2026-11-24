@@ -93,8 +93,9 @@ class Correspondence:
                     return 'That candidate is not in this case’s latest search. Search again or select a displayed reference.'
                 if row.selected_thread == match.thread_id:
                     return self._render_selected(row)
-                with self.mailbox() as mailbox, tracing.operation('gmail.read_thread', {}, private=True) as span:
+                with self.mailbox() as mailbox, tracing.operation('gmail.read_thread', {'thread_id': match.thread_id}, private=True) as span:
                     thread_result = await sync_to_async(mailbox.thread)(match.thread_id, row.mailbox)
+                    tracing.record_output(span, asdict(thread_result))
                     span.set_attribute('gmail.messages', len(thread_result.items))
                     span.set_attribute('gmail.truncated', thread_result.truncated)
                 return await self._save_selection(turn, selection, current, reference, match.thread_id, thread_result)
@@ -108,9 +109,10 @@ class Correspondence:
             raise GmailError('Gmail search is unavailable')
         identifiers = {key: current.facts[key] for key in ('company', 'order_reference') if current.facts.get(key)}
         await self._snapshot(turn, selection, current)
-        with tracing.operation('gmail.plan_queries', {}, kind='agent', private=True) as span:
+        with tracing.operation('gmail.plan_queries', {'request': turn.text, 'case': current.label, 'identifiers': identifiers}, kind='agent', private=True) as span:
             plan = await self.planner.run(turn.text, current.label, identifiers, usage, request_limit)
             span.set_attribute('gmail.query_count', len(plan.queries))
+            tracing.record_output(span, {'queries': plan.queries})
         items: list[Candidate] = []
         seen: set[str] = set()
         account = ''
@@ -118,8 +120,9 @@ class Correspondence:
         with self.mailbox() as mailbox:
             for query in plan.queries:
                 await self._snapshot(turn, selection, current)
-                with tracing.operation('gmail.search', {}, private=True) as span:
+                with tracing.operation('gmail.search', {'query': query}, private=True) as span:
                     found = await sync_to_async(mailbox.search)(query)
+                    tracing.record_output(span, asdict(found))
                     span.set_attribute('gmail.results', len(found.items))
                     span.set_attribute('gmail.truncated', found.truncated)
                 if account and account != found.mailbox:
@@ -145,8 +148,9 @@ class Correspondence:
             if row.selected_thread:
                 if self.mailbox is None:
                     raise GmailError('Gmail is unavailable')
-                with self.mailbox() as mailbox, tracing.operation('gmail.refresh_thread', {}, private=True) as span:
+                with self.mailbox() as mailbox, tracing.operation('gmail.refresh_thread', {'thread_id': row.selected_thread}, private=True) as span:
                     fresh = await sync_to_async(mailbox.thread)(row.selected_thread, row.mailbox)
+                    tracing.record_output(span, asdict(fresh))
                     span.set_attribute('gmail.messages', len(fresh.items))
                     span.set_attribute('gmail.truncated', fresh.truncated)
                 await self._save_refresh(turn, selection, current, row.selected_thread, fresh)
@@ -172,8 +176,9 @@ class Correspondence:
                 if self.mailbox is None:
                     raise GmailError('Gmail is unavailable')
                 await self._snapshot(turn, selection, current)
-                with self.mailbox() as mailbox, tracing.operation('gmail.read_thread', {}, private=True) as span:
+                with self.mailbox() as mailbox, tracing.operation('gmail.read_thread', {'thread_id': candidate.thread_id}, private=True) as span:
                     result = await sync_to_async(mailbox.thread)(candidate.thread_id, row.mailbox)
+                    tracing.record_output(span, asdict(result))
                     span.set_attribute('gmail.messages', len(result.items))
                     span.set_attribute('gmail.truncated', result.truncated)
                 await self._save_selection(turn, selection, current, candidate.reference, candidate.thread_id, result)

@@ -21,7 +21,7 @@ Test the user experience in the private Telegram bot, not with internal candidat
 3. **“Draft a reply in Gmail asking them what happens next.”** With compose permission, expect a recipient/version confirmation and specific-draft web link and mailbox/subject fallback, not a full draft in Telegram. With read-only permission, expect an honest permission message and no draft.
 4. **“For this comparison, my two languages are Python and Ruby. Acknowledge without searching.”** Then **“Which two languages?”** Expect Python and Ruby, without forcing grievance handling.
 
-Real email traces deliberately show `{"omitted":"email privacy"}` while retaining stages and timing. To inspect readable content, use the synthetic Langfuse experiments. These fixture-based experiments do not access the real inbox:
+By default, real email traces show `{"omitted":"email privacy"}` while retaining stages and timing. For local development, set `LANGFUSE_CAPTURE_CONTENT=true`, `LANGFUSE_CAPTURE_PRIVATE_CONTENT=true`, and `LANGFUSE_CAPTURE_EMAIL_CONTENT=true` in `.env`, then restart the bot. The email opt-in is honored only for loopback Langfuse endpoints (`localhost`, `127.0.0.1`, `::1`). It records real prompts, answers and Gmail operation payloads in local Langfuse; credentials are never passed to tracing. Existing omitted traces cannot be reconstructed. To inspect readable content, use the synthetic Langfuse experiments. These fixture-based experiments do not access the real inbox:
 
 ```sh
 uv run python manage.py evaluate_gmail

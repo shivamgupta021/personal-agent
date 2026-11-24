@@ -1,7 +1,7 @@
 """Resolve and revalidate the exact Gmail draft selected for a new revision."""
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from email.utils import getaddresses
 
 from asgiref.sync import sync_to_async
@@ -52,8 +52,9 @@ class DraftRevisions:
     async def read(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
                    mailbox: str, thread_id: str, version: int | None) -> RevisionSource:
         row = await self.resolve(turn, selection, current, mailbox, thread_id, version)
-        with self.mailbox() as client, tracing.operation('gmail.read_revision', {}, private=True):
+        with self.mailbox() as client, tracing.operation('gmail.read_revision', {'draft_id': row.gmail_id}, private=True) as span:
             envelope = await sync_to_async(client.read_draft)(row.gmail_id, mailbox)
+            tracing.record_output(span, asdict(envelope))
         if envelope.thread_id != row.thread_id or self.address(envelope.recipient) != self.address(row.recipient):
             raise GmailError('The Gmail draft recipient or conversation changed. Please confirm the intended recipient and draft before revising it.')
         return RevisionSource(row.pk, row.gmail_id, row.draft.version, envelope)
@@ -66,7 +67,8 @@ class DraftRevisions:
         return addresses[0]
 
     async def validate(self, source: RevisionSource) -> None:
-        with self.mailbox() as client, tracing.operation('gmail.check_revision', {}, private=True):
+        with self.mailbox() as client, tracing.operation('gmail.check_revision', {'draft_id': source.gmail_id}, private=True) as span:
             current = await sync_to_async(client.read_draft)(source.gmail_id, source.envelope.mailbox)
+            tracing.record_output(span, {'unchanged': current == source.envelope})
         if current != source.envelope:
             raise GmailError('The original Gmail draft changed while I was preparing the revision. No new draft was created; please request the revision again.')
