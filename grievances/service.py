@@ -25,6 +25,7 @@ from grievances.ownership import CaseOwnership
 from grievances.deletion import CaseDeletionService
 from grievances.cleanup import CaseTraceCleanup
 from core.tracing import tracing
+from preferences.inspection import PreferenceInspection
 from grievances import constants
 from grievances.drafts import DraftService
 from grievances.policy import PolicyResearchService, PublicResearchBoundary
@@ -85,6 +86,8 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
+        if action.action == 'list_preferences':
+            return await PreferenceInspection().run(turn)
         if action.action == 'gmail_connect':
             if (not action.gmail_account or action.gmail_account not in turn.text
                     or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', action.gmail_account)

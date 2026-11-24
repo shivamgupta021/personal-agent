@@ -6,6 +6,7 @@ from core.tracing import tracing
 from core.email_telemetry import email_private
 from gmail.correspondence import Correspondence
 from core.turns import OwnerTurn, PreparedReply
+from preferences.inspection import PreferenceInspection
 from grievances.cleanup import CaseTraceCleanup
 from grievances.deletion import CaseDeletionService
 from grievances.ownership import CaseOwnership
@@ -38,7 +39,10 @@ class ApplicationTurn:
                 tracing.record_input(span, {'message': turn.text})
                 control = await self.deletion.control(turn)
                 if control is None:
-                    text = await execute(turn, epoch)
+                    if PreferenceInspection.matches(turn.text):
+                        text = await PreferenceInspection().run(turn)
+                    else:
+                        text = await execute(turn, epoch)
                 else:
                     text = control.message
                     if control.deleted:
