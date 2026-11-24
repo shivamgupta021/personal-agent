@@ -15,6 +15,8 @@ from gmail.correspondence import Correspondence
 from gmail.factory import GmailFactory
 from gmail.planner import GmailQueryPlanner
 from gmail.reply_checks import GmailReplyChecks
+from gmail.monitoring_store import MonitoringStore
+from django.utils import timezone
 from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn, PreparedReply
 from grievances.ownership import CaseOwnership
@@ -80,6 +82,10 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
+        if action.action in ('gmail_monitor_start', 'gmail_monitor_stop', 'gmail_monitor_status'):
+            if current is None:
+                return 'Which case should I monitor?'
+            return await MonitoringStore().control(turn, selection, current, action.action, timezone.now())
         if action.action == 'case_help':
             return await CaseAssistance(self.model, self.store, self.correspondence).run(
                 turn, action, selection, current, usage)

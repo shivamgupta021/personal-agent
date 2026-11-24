@@ -147,6 +147,10 @@ class CaseIntake:
             return 'Company correspondence cannot authorize case changes or sending. Please save the quoted reply first; nothing was changed.'
         if any(f.quote not in request or f.value not in f.quote for f in action.facts):
             return 'I could not verify the supplied facts. Nothing changed; please state them explicitly.'
+        if action.action in ('gmail_monitor_start', 'gmail_monitor_stop'):
+            if (not action.intent_quote or action.intent_quote not in request
+                    or not re.search(r'\b(monitor|monitoring|watch|notify|keep an eye|let me know)\b', action.intent_quote, re.IGNORECASE)):
+                return 'Please explicitly request starting or stopping monitoring. Nothing changed.'
         if action.action == 'delete':
             return 'Please explicitly say “Delete this case” or “Delete case LABEL”. Nothing changed.'
         if action.action in ('create', 'select', 'leave') and (not action.intent_quote or action.intent_quote not in request):

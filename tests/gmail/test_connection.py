@@ -431,3 +431,11 @@ def test_failed_draft_upgrade_preserves_reading(connection: tuple[GmailService, 
     current = service.store.load()
     assert current is not None
     assert current.credentials.to_json() == original.credentials.to_json()
+
+
+def test_disconnect_invalidates_monitors_before_credentials_are_disabled(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain]) -> None:
+    service, _, _ = connection
+    events: list[str] = []
+    service.disable_monitoring = lambda: events.append('stopped')
+    service.disconnect()
+    assert events == ['stopped']

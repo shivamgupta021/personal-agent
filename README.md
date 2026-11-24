@@ -766,3 +766,28 @@ Deep-link, revision (#46), and on-demand reply-check (#47) acceptance:
 - Live revision created a separate unsent v2, preserved v1 byte-for-byte at the decoded-envelope boundary, kept recipient/thread, and reduced body length from 828 to 563 characters. Its link opened the actual v2 editor. [Trace, 75.2 seconds](http://localhost:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/e65f6bad62903a8c266728178e040e8e): 61 seconds were in initial model routing; latency remains a limitation.
 - Live selected-thread reply check returned no newly received messages, summarized the latest company reply, and disclosed partial retrieval and unread attachments. It did not claim sending or resolution. [Trace, 14.2 seconds](http://localhost:3000/project/cmwlnbvg00007ro3rd5obwpcu/traces/6758cb2a55be247b9fd6fbdf205880c3).
 - Real-email trace payloads use explicit email-privacy omission indicators. No email was sent, no existing Gmail draft was overwritten, and monitoring remains off. Positive SENT matching is covered with controlled data; no real email was sent merely to test it.
+
+### Local reply monitoring (#48)
+
+The existing `uv run python manage.py telegram` process also runs bounded monitoring
+checks between Telegram polls. No additional hosted worker or Gmail webhook is required.
+After selecting a case with imported correspondence, say “Watch this case for new
+replies.” Ask “Is monitoring on?” or “Stop monitoring this case.”
+
+Monitoring is explicit per case and checks only its selected thread, approximately
+every five minutes while the Mac is awake and the bot runs. Long foreground requests
+can delay checks. A restart catches up with bounded reads; original thread limits and
+unread-attachment caveats still apply. Unchanged messages reuse validated classification
+rather than invoking the model on every poll. Monitoring never drafts, sends email,
+or resolves a case. One-time deadline reminders are a separate milestone (#49).
+
+`CaseMonitor` and `MonitorNotification` persist in PostgreSQL. Notifications are queued
+transactionally with seen-message progress and marked attempted before Telegram handoff.
+An uncertain send is not retried automatically; monitoring status reports that uncertainty.
+This suppresses duplicates but cannot promise exactly-once external delivery. Stop,
+case closure/deletion, or deliberate Gmail disconnect invalidates future delivery;
+reconnection alone does not resume monitoring.
+
+Controlled regression checks: `uv run pytest tests/gmail/test_monitoring.py`.
+Existing model-quality checks: `uv run python manage.py evaluate_gmail_replies`
+(synthetic Gmail evidence, real model, results in Langfuse).

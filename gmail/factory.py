@@ -14,6 +14,7 @@ from gmail.errors import GmailError
 from gmail.service import GmailService
 from gmail.mailbox import Mailbox
 from gmail.constants import HTTP_TIMEOUT_SECONDS
+from gmail.monitoring_store import MonitoringStore
 
 
 class GmailFactory:
@@ -24,7 +25,7 @@ class GmailFactory:
             raise GmailError('Configure TELEGRAM_OWNER_ID before connecting Gmail.')
         directory = Path(settings.GMAIL_STATE_DIR) / owner
         account = hashlib.sha256(str(settings.BASE_DIR).encode()).hexdigest()[:16] + ':' + owner
-        return GmailService(KeychainStore(directory, account), GoogleClient(), directory)
+        return GmailService(KeychainStore(directory, account), GoogleClient(), directory, disable_monitoring=lambda: MonitoringStore.disconnect(owner))
 
     @staticmethod
     @contextmanager
