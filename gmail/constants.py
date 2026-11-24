@@ -1,0 +1,9 @@
+READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+SCOPES = (READONLY_SCOPE,)
+HTTP_TIMEOUT_SECONDS = 20
+CONSENT_TIMEOUT_SECONDS = 180
+PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile'
+TOKEN_URL = 'https://oauth2.googleapis.com/token'
+REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
+AUTH_URLS = ('https://accounts.google.com/o/oauth2/auth', 'https://accounts.google.com/o/oauth2/v2/auth')
+KEYCHAIN_SERVICE = 'personal-agent.gmail'

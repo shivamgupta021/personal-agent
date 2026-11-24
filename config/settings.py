@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,7 @@ INSTALLED_APPS = [
     'subscriptions.apps.SubscriptionsConfig',
     'research.apps.ResearchConfig',
     'telegram_bot.apps.TelegramBotConfig',
+    'gmail',
 ]
 ROOT_URLCONF = 'config.urls'
 WSGI_APPLICATION = 'config.wsgi.application'
@@ -45,6 +47,8 @@ TELEGRAM_OWNER_ID = os.getenv('TELEGRAM_OWNER_ID', '')
 TELEGRAM_STATE_DIR = BASE_DIR / '.local' / 'telegram'
 
 SUBSCRIPTION_STATE_DIR = BASE_DIR / '.local' / 'chatgpt'
+GMAIL_STATE_DIR = BASE_DIR / '.local' / 'gmail'
+GMAIL_CLIENT_FILE = os.getenv('GMAIL_CLIENT_FILE', '')
 FIRECRAWL_BASE_URL = os.getenv('FIRECRAWL_BASE_URL', 'http://127.0.0.1:3002')
 FIRECRAWL_API_KEY = os.getenv('FIRECRAWL_API_KEY', '')
 LANGFUSE_BASE_URL = os.getenv('LANGFUSE_BASE_URL', 'http://127.0.0.1:3000')
@@ -53,7 +57,7 @@ LANGFUSE_SECRET_KEY = os.getenv('LANGFUSE_SECRET_KEY', '')
 LANGFUSE_CAPTURE_CONTENT = os.getenv('LANGFUSE_CAPTURE_CONTENT', 'false').strip().lower() == 'true'
 LANGFUSE_TIMEOUT_SECONDS = 5.0
 
-LOGGING = {
+LOGGING: dict[str, Any] = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {'console': {'format': '%(levelname)s %(name)s: %(message)s'}},
@@ -64,3 +68,6 @@ LOGGING = {
     },
 }
 os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
+# OAuth libraries can log token request bodies at DEBUG; do not enable those logs.
+for oauth_logger in ('google.auth', 'google_auth_oauthlib', 'requests_oauthlib', 'oauthlib'):
+    LOGGING['loggers'][oauth_logger] = {'handlers': ['console'], 'level': 'WARNING', 'propagate': False}
