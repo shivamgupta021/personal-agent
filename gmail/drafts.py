@@ -30,14 +30,14 @@ from grievances.store import CaseView, SelectionView
 
 class EmailQuote(BaseModel):
     message_id: str
-    quote: str = Field(min_length=1, max_length=2000)
+    quote: str = Field(min_length=1, max_length=constants.DRAFT_MAX_QUOTE_CHARS)
 
 
 class EmailDraft(BaseModel):
     subject: str = Field(min_length=1, max_length=constants.DRAFT_MAX_SUBJECT_CHARS)
     body: str = Field(min_length=1, max_length=constants.DRAFT_MAX_BODY_CHARS)
-    sources: list[EmailQuote] = Field(default_factory=list, max_length=20)
-    question: str = Field(default='', max_length=400)
+    sources: list[EmailQuote] = Field(default_factory=list, max_length=constants.DRAFT_MAX_SOURCES)
+    question: str = Field(default='', max_length=constants.DRAFT_MAX_QUESTION_CHARS)
 
 
 class GmailDraftService:

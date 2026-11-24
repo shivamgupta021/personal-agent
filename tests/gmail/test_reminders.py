@@ -219,3 +219,66 @@ def test_explicitly_named_case_reminder_does_not_require_separate_selection(monk
         'Remind me in ten minutes about Refund if there is no reply.')))
     assert 'I’ll remind you once' in answer
     assert CaseReminder.objects.get().monitor.mailbox_record.case.pk == h.case.pk
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('reply_arrived', [False, True])
+def test_queued_reminder_rechecks_after_restart(monkeypatch: pytest.MonkeyPatch, reply_arrived: bool) -> None:
+    h = ReminderHarness(monkeypatch)
+    h.remind()
+    h.now = h.deadline
+
+    async def interrupt_handoff(identifier: int, job: object) -> bool:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(h.worker.store, 'handoff', interrupt_handoff)
+    with pytest.raises(asyncio.CancelledError):
+        h.tick()
+    assert CaseReminder.objects.get().status == ReminderStatus.QUEUED
+    assert not MonitorNotification.objects.get(reminder_revision__gt=0).attempted
+    h.worker = h.new_worker()
+    if reply_arrived:
+        h.classification = 'substantive'
+        h.mailbox.messages.append(h.new)
+    else:
+        h.mailbox.failure = True
+    h.tick()
+    assert not any('found no substantive reply' in text for text in h.delivered)
+    assert CaseReminder.objects.get().status == (ReminderStatus.SATISFIED if reply_arrived else ReminderStatus.QUEUED)
+    if not reply_arrived:
+        reads = h.mailbox.reads
+        h.tick()
+        assert h.mailbox.reads == reads  # Failed delivery recheck respects retry backoff.
+
+
+@pytest.mark.django_db(transaction=True)
+def test_later_substantive_reply_clears_pending_clarification(monkeypatch: pytest.MonkeyPatch) -> None:
+    h = ReminderHarness(monkeypatch)
+    h.remind()
+    h.classification = 'uncertain'
+    h.mailbox.messages.append(h.new)
+    h.now = h.deadline
+    h.tick()
+    assert CaseReminder.objects.get().status == ReminderStatus.CLARIFY
+    h.classification = 'substantive'
+    h.mailbox.messages.append(ImportedMessage('later', 'thread1', 'support@example.com', 'Refund', '', 'Approved and paid.', False))
+    h.now += timedelta(minutes=6)
+    h.tick()
+    assert CaseReminder.objects.get().status == ReminderStatus.SATISFIED
+    h.case.refresh_from_db()
+    assert h.case.status == 'open'
+
+
+@pytest.mark.django_db(transaction=True)
+def test_stop_before_correspondence_is_retained() -> None:
+    h = MonitoringHarness()
+    h.row.delete()
+    assert 'Monitoring stopped' in h.control('gmail_monitor_stop')
+    h.row.save()
+    selection = asyncio.run(h.app.store.selection('bot:123', 'chat'))
+    current = asyncio.run(h.app.store.get_case('bot:123', str(h.case.pk)))
+    assert current is not None
+    answer = asyncio.run(MonitoringStore().control(OwnerTurn('bot:123', 'chat', 'auto-after-stop', 'Help me'),
+        selection, current, 'gmail_monitor_start', h.now, automatic=True))
+    assert answer == '' and not CaseMonitor.objects.filter(active=True).exists()
+    assert 'I’ll watch' in h.control('gmail_monitor_start')

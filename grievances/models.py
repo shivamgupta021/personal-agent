@@ -15,6 +15,7 @@ class GrievanceCase(models.Model):
     label_key: models.CharField[str, str] = models.CharField(max_length=120)
     status: models.CharField[str, str] = models.CharField(max_length=32, default='open')
     revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    monitoring_paused: models.BooleanField[bool, bool] = models.BooleanField(default=False)
     progress_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
     created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
 

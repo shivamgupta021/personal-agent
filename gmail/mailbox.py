@@ -75,9 +75,9 @@ class Mailbox:
                     sender=headers.get('from', '')[:constants.MAX_PREVIEW_CHARS],
                     subject=headers.get('subject', '')[:constants.MAX_PREVIEW_CHARS],
                     date=headers.get('date', '')[:constants.MAX_PREVIEW_CHARS],
-                    text=text[:allowance], unread_attachments=attachments, labels=tuple(message.get('labelIds', [])), recipient=headers.get('to', '')[:1000],
-                    reply_to=headers.get('reply-to', '')[:1000], rfc_message_id=headers.get('message-id', '')[:1000],
-                    references=headers.get('references', '')[:4000]))
+                    text=text[:allowance], unread_attachments=attachments, labels=tuple(message.get('labelIds', [])), recipient=headers.get('to', '')[:constants.MAX_ADDRESS_HEADER_CHARS],
+                    reply_to=headers.get('reply-to', '')[:constants.MAX_ADDRESS_HEADER_CHARS], rfc_message_id=headers.get('message-id', '')[:constants.MAX_ADDRESS_HEADER_CHARS],
+                    references=headers.get('references', '')[:constants.MAX_REFERENCE_HEADER_CHARS]))
                 remaining = max(0, remaining - min(len(text), allowance))
             return MailResult(connection.email, list(reversed(items)), truncated)
 
