@@ -87,11 +87,11 @@ def test_revision_reads_manual_edits_and_creates_new_version_without_overwrite(t
         assert await ComplaintDraft.objects.acount() == 2
         assert await GmailDraftExport.objects.acount() == 2
         answer = await harness.send('Revise the draft to be shorter')
-        assert 'Which version' in answer and len(harness.created) == 2
+        assert 'Draft v3' in answer and len(harness.created) == 3
         harness.revision_version = 1
         harness.corrected = True
         answer = await harness.send('Revise v1 and correct the refund amount to 1200')
-        assert 'Draft v3' in answer and len(harness.created) == 3
+        assert 'Draft v4' in answer and len(harness.created) == 4
     try:
         asyncio.run(run())
     finally:

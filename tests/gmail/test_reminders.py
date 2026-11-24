@@ -9,11 +9,11 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, User
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from core.turns import OwnerTurn
-from gmail.models import CaseMonitor, CaseReminder, MonitorNotification
+from gmail.models import CaseMonitor, CaseReminder, MonitorNotification, GmailDraftExport
 from gmail.monitoring_store import MonitoringStore
 from gmail.records import ImportedMessage
 from gmail.reminder_constants import ReminderStatus
-from grievances.models import CaseSelection, GrievanceCase, CaseFactRevision
+from grievances.models import CaseSelection, GrievanceCase, CaseFactRevision, ComplaintDraft, CaseOperationReceipt
 from tests.gmail.test_monitoring import MonitoringHarness, ControlledSubscription
 
 
@@ -22,6 +22,7 @@ class ReminderHarness(MonitoringHarness):
         super().__init__()
         self.deadline = self.now + timedelta(minutes=10)
         self.classification = 'acknowledgement'
+        self.reminder_kind: str | None = 'no_response'
         self.confirm_substantive = False
         self.truncated = False
         self.sent = ImportedMessage('sent', 'thread1', 'owner@example.com', 'Refund', '', 'Please refund.', False, ('SENT',), 'support@example.com')
@@ -46,7 +47,7 @@ class ReminderHarness(MonitoringHarness):
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
             'action': self.action, 'case_id': str(self.case.pk), 'intent_quote': data['current_request'],
             'deadline_quote': data['current_request'], 'reminder_at': self.deadline.isoformat() if self.deadline else None,
-            'reply_is_substantive': self.confirm_substantive})])
+            'reply_is_substantive': self.confirm_substantive, 'reminder_kind': self.reminder_kind})])
 
     def remind(self, action: str = 'gmail_reminder_set') -> str:
         self.action = action
@@ -282,3 +283,51 @@ def test_stop_before_correspondence_is_retained() -> None:
         selection, current, 'gmail_monitor_start', h.now, automatic=True))
     assert answer == '' and not CaseMonitor.objects.filter(active=True).exists()
     assert 'I’ll watch' in h.control('gmail_monitor_start')
+
+
+@pytest.mark.django_db(transaction=True)
+def test_existing_reply_does_not_satisfy_new_future_reminder(monkeypatch: pytest.MonkeyPatch) -> None:
+    h = ReminderHarness(monkeypatch)
+    h.classification = 'substantive'
+    h.mailbox.messages.append(h.old)
+    h.remind()
+    h.now = h.deadline
+    h.tick()
+    assert CaseReminder.objects.get().status == ReminderStatus.NOTIFIED
+    assert any('since this reminder' in text for text in h.delivered)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_draft_review_reminder_delivers_without_sent_mail_or_model_at_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    h = ReminderHarness(monkeypatch)
+    h.reminder_kind = 'draft_review'
+    receipt = CaseOperationReceipt.objects.create(owner_id='bot:123', conversation_id='chat', delivery_id='draft', action='draft', outcome='saved')
+    CaseFactRevision.objects.create(case=h.case, revision=1, facts={}, kind='create')
+    draft = ComplaintDraft.objects.create(case=h.case, version=1, fact_revision=1, operation=receipt, subject='Refund', body='Please review')
+    GmailDraftExport.objects.create(draft=draft, mailbox='owner@example.com', recipient='support@example.com', thread_id='thread1', fingerprint='test', status='created', gmail_id='draft1')
+    h.row.messages = [asdict(h.old)]
+    h.row.save()
+    h.mailbox.messages = [h.old]
+    h.control()
+    h.action = 'gmail_reminder_set'
+    answer = asyncio.run(h.app.run(OwnerTurn('bot:123', 'chat', 'review-reminder', 'Remind me in ten minutes to review that draft.')))
+    assert 'review draft v1' in answer
+    assert h.mailbox.reads == 0
+    second_receipt = CaseOperationReceipt.objects.create(owner_id='bot:123', conversation_id='chat', delivery_id='draft2', action='draft', outcome='saved')
+    second = ComplaintDraft.objects.create(case=h.case, version=2, fact_revision=1, operation=second_receipt, subject='Refund', body='New draft')
+    GmailDraftExport.objects.create(draft=second, mailbox='owner@example.com', recipient='support@example.com', thread_id='thread1', fingerprint='test2', status='created', gmail_id='draft2')
+    h.reminder_kind = None
+    h.deadline += timedelta(minutes=5)
+    answer = asyncio.run(h.app.run(OwnerTurn('bot:123', 'chat', 'move-review', 'Move that reminder five minutes later.')))
+    assert 'review draft v1' in answer
+    assert CaseReminder.objects.get().draft_version == 1
+    assert h.mailbox.reads == 0
+    # Hold unrelated periodic monitoring until after this deadline.
+    CaseMonitor.objects.update(next_check=h.deadline + timedelta(minutes=5))
+    h.now = h.deadline
+    h.worker = h.new_worker()
+    h.tick()
+    assert len(h.delivered) == 1 and 'review draft v1' in h.delivered[0]
+    assert h.mailbox.reads == 0
+    h.tick()
+    assert len(h.delivered) == 1

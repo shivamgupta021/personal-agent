@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 from asgiref.sync import sync_to_async
 
 from core.turns import OwnerTurn
-from gmail.models import CaseMonitor, CaseReminder, MonitorNotification
-from gmail.reminder_constants import REMINDER_TIMEZONE, ReminderStatus
+from gmail.models import CaseMonitor, CaseReminder, MonitorNotification, GmailDraftExport
+from gmail.reminder_constants import REMINDER_TIMEZONE, ReminderStatus, ReminderKind
 from gmail.reply_checks import ReplyCheckResult
 from grievances.models import SentReport
 from grievances.mutations import CaseMutation
@@ -16,6 +16,16 @@ from grievances.store import CaseView, SelectionView
 
 
 class ReminderStore:
+    @staticmethod
+    async def resolve_kind(owner_id: str, case_id: str, action: IntakeAction) -> IntakeAction:
+        if action.action != 'gmail_reminder_set':
+            return action
+        saved = await CaseReminder.objects.filter(monitor__mailbox_record__case_id=case_id,
+            monitor__mailbox_record__case__owner_id=owner_id).afirst()
+        return action.model_copy(update={'reminder_kind': action.reminder_kind or (saved.kind if saved else ReminderKind.NO_RESPONSE.value),
+            'draft_version': action.draft_version if action.draft_version is not None else (
+                saved.draft_version if saved and action.reminder_kind in (None, saved.kind) else None)})
+
     @staticmethod
     def deadline_error(action: IntakeAction, request: str, now: datetime) -> str | None:
         if action.action != 'gmail_reminder_set':
@@ -73,11 +83,18 @@ class ReminderStore:
                 return 'Reply assessment saved. ' + ('The no-response reminder is cancelled; the case remains open.'
                     if action.reply_is_substantive else 'I’ll recheck before delivering the reminder.')
             row = monitor.mailbox_record
+            review = action.reminder_kind == ReminderKind.DRAFT_REVIEW.value
+            drafts = GmailDraftExport.objects.filter(draft__case=mutation.case, status='created')
+            if action.draft_version is not None:
+                drafts = drafts.filter(draft__version=action.draft_version)
+            draft = drafts.select_related('draft').order_by('-draft__version').first() if review else None
+            if review and draft is None:
+                return 'There is no saved Gmail draft to review for this case. Ask me to prepare one first.'
             sent = [message for message in row.messages if 'SENT' in message.get('labels', [])
                 and 'DRAFT' not in message.get('labels', [])
                 and [address.casefold() for _, address in getaddresses([message.get('sender', '')])] == [row.mailbox.casefold()]]
             report = SentReport.objects.filter(case=mutation.case).order_by('-pk').first()
-            if not sent and report is None:
+            if not review and not sent and report is None:
                 return 'I have not established that the company was contacted. Send the draft in Gmail, then ask me to check, or explicitly tell me which draft version you sent.'
             due_at = action.reminder_at
             if due_at is None:
@@ -87,16 +104,21 @@ class ReminderStore:
             MonitorNotification.objects.filter(monitor=monitor, reminder_revision=reminder.revision, attempted=False).update(cancelled=True)
             reminder.revision += 1
             reminder.status, reminder.due_at, reminder.reason = ReminderStatus.PENDING, due_at, ''
+            reminder.kind = action.reminder_kind or ReminderKind.NO_RESPONSE.value
+            reminder.draft_version = draft.draft.version if draft else None
             reminder.sent_provenance = 'gmail_verified' if sent else 'owner_reported'
             reminder.sent_reference = sent[-1]['message_id'] if sent else str(report.pk) if report else ''
             reminder.baseline_message_ids = [message['message_id'] for message in row.messages]
             reminder.dismissed_message_ids, reminder.question_message_ids = [], []
             reminder.save()
-            monitor.next_check = min(monitor.next_check, due_at)
+            if not review:
+                monitor.next_check = min(monitor.next_check, due_at)
             monitor.save(update_fields=['next_check'])
             mutation.record('reminder_set', mutation.case)
+            if review:
+                return f'I’ll remind you once to review draft v{reminder.draft_version} for {current.label} on {self.display(due_at)}. The local bot must be running; nothing will be sent.'
             provenance = 'Gmail confirms sent correspondence.' if sent else 'Sending is based on your report, not verified in Gmail; I’ll watch for new replies from now.'
-            return (f'I’ll remind you once on {self.display(due_at)} if no substantive reply is established after checking the thread. '
+            return (f'I’ll remind you once on {self.display(due_at)} if no new substantive reply arrives after this reminder was set. '
                 f'{provenance} The local bot must be running; after sleep or restart I’ll check before notifying you.')
 
     @staticmethod
@@ -107,7 +129,7 @@ class ReminderStore:
     def assess(monitor: CaseMonitor, result: ReplyCheckResult, now: datetime) -> None:
         """Caller holds owner and monitor locks; state and notification commit together."""
         reminder = CaseReminder.objects.select_for_update().filter(monitor=monitor, status__in=[ReminderStatus.PENDING, ReminderStatus.QUEUED, ReminderStatus.CLARIFY]).first()
-        if reminder is None or not result.verified:
+        if reminder is None or reminder.kind == ReminderKind.DRAFT_REVIEW or not result.verified:
             return
         previous_status = reminder.status
         after = list(result.message_ids)
@@ -121,7 +143,8 @@ class ReminderStore:
             # No provider anchor exists: report only new replies since this reminder was set.
             after = [identifier for identifier in after if identifier not in reminder.baseline_message_ids]
         relevant = [finding for finding in result.findings if finding.message_id in after
-            and finding.message_id not in reminder.dismissed_message_ids]
+            and finding.message_id not in reminder.dismissed_message_ids
+            and finding.message_id not in reminder.baseline_message_ids]
         if any(finding.classification == 'substantive' for finding in relevant):
             MonitorNotification.objects.filter(monitor=monitor, reminder_revision=reminder.revision, attempted=False).update(cancelled=True)
             reminder.status, reminder.reason = ReminderStatus.SATISFIED, 'Substantive reply received; case outcome unchanged.'
@@ -144,7 +167,7 @@ class ReminderStore:
             return
         reminder.status = ReminderStatus.QUEUED
         reminder.save(update_fields=['status'])
-        qualification = ('after your sent message' if reminder.sent_provenance == 'gmail_verified'
+        qualification = ('since this reminder was set, following your sent message' if reminder.sent_provenance == 'gmail_verified'
             else 'since this reminder was set; sending remains owner-reported')
         MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation,
             reminder_revision=reminder.revision,

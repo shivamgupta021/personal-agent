@@ -12,6 +12,10 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.tracing import tracing
+from conversations.context import ConversationContext
+from conversations.store import ConversationStore
+from conversations.constants import MAX_INLINE_CONTEXT_BYTES
+from conversations.direct import DirectConversation
 from core.turns import OwnerTurn
 from gmail.models import CaseMailbox, EmailConsent, CaseReminder
 from grievances import constants
@@ -28,7 +32,7 @@ DRAFT_ACTIONS = frozenset(('draft', 'list_drafts', 'read_draft'))
 POLICY_ACTIONS = frozenset(('review_research', 'confirm_research', 'research'))
 PROGRESS_ACTIONS = frozenset(('record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up'))
 SELECTED_ACTIONS = frozenset(('show', 'update')) | DRAFT_ACTIONS | POLICY_ACTIONS | PROGRESS_ACTIONS
-GENERAL_ACTIONS = frozenset(('conversation', 'memory', 'public', 'list_preferences'))
+GENERAL_ACTIONS = frozenset(('conversation', 'memory', 'public', 'list_preferences', 'preference'))
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,7 @@ class AuthorizedIntake:
     current: CaseView | None
     usage: RunUsage
     company_reply: ParsedCompanyReply | None
+    conversation: ConversationContext | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,7 @@ class _IntakeContext:
     current: CaseView | None
     directory: dict[str, object]
     progress: ProgressSnapshot | None
+    conversation: ConversationContext | None = None
 
     def selected_payload(self, request: str) -> dict[str, object]:
         if self.current is None:
@@ -119,7 +125,7 @@ class CaseIntake:
         rejection = self._authorize(turn.text, action, context.selection, company_reply)
         if rejection is not None:
             return rejection
-        return AuthorizedIntake(action, context.selection, context.current, usage, company_reply)
+        return AuthorizedIntake(action, context.selection, context.current, usage, company_reply, context.conversation)
 
     async def _context(self, turn: OwnerTurn, epoch: int) -> _IntakeContext:
         selection = replace(await self.store.selection(turn.owner_id, turn.conversation_id), deletion_epoch=epoch)
@@ -134,8 +140,15 @@ class CaseIntake:
         preferences = await PreferenceStore().list(turn.owner_id)
         pending = await CaseMailbox.objects.filter(case_id=current.id).afirst() if current else None
         reminder = await CaseReminder.objects.filter(monitor__mailbox_record__case_id=current.id).afirst() if current else None
+        saved_conversation = await ConversationStore().context(turn.owner_id)
+        conversation: ConversationContext | None = saved_conversation
+        dialogue = DirectConversation.dialogue(saved_conversation)
+        encoded_history = json.dumps(dialogue).encode()
+        if len(encoded_history) > MAX_INLINE_CONTEXT_BYTES or pending and pending.pending_question:
+            conversation = None
         directory: dict[str, object] = {
-            'reminder': {'status': reminder.status, 'deadline': reminder.due_at.isoformat(), 'question': reminder.reason} if reminder else None,
+            'conversation_history': dialogue if conversation is not None else None,
+            'reminder': {'kind': reminder.kind, 'draft_version': reminder.draft_version, 'status': reminder.status, 'deadline': reminder.due_at.isoformat(), 'question': reminder.reason} if reminder else None,
             'gmail_enabled': await EmailConsent.objects.filter(owner_id=turn.owner_id).aexists(),
             'mail_pending': {'goal': pending.pending_goal, 'question': pending.pending_question, 'choices': pending.candidates} if pending and pending.pending_question else None,
             'current_time': timezone.now().astimezone(ZoneInfo(REMINDER_TIMEZONE)).isoformat(),
@@ -145,7 +158,10 @@ class CaseIntake:
             'case_labels': [asdict(case) for case in cases],
             'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences],
         }
-        return _IntakeContext(selection, current, directory, progress)
+        if len(json.dumps(directory)) > constants.MAX_CONTEXT_CHARS:
+            directory['conversation_history'] = None
+            conversation = None
+        return _IntakeContext(selection, current, directory, progress, conversation)
 
     @staticmethod
     def _authorize(request: str, action: IntakeAction, selection: SelectionView,

@@ -6,6 +6,7 @@ from datetime import datetime
 from django.db import models
 
 from grievances.models import GrievanceCase, ComplaintDraft
+from gmail.reminder_constants import ReminderKind
 
 
 class EmailConsent(models.Model):
@@ -39,6 +40,7 @@ class GmailDraftExport(models.Model):
 
 
 class GmailReplyCheckState(models.Model):
+    analysis_fingerprint: models.CharField[str, str] = models.CharField(max_length=64, default='')
     mailbox_record: models.OneToOneField[CaseMailbox, CaseMailbox] = models.OneToOneField(CaseMailbox, on_delete=models.CASCADE)
     seen_message_ids = models.JSONField(default=list)
     findings = models.JSONField(default=list)
@@ -74,6 +76,8 @@ class MonitorNotification(models.Model):
 
 
 class CaseReminder(models.Model):
+    kind: models.CharField[str, str] = models.CharField(max_length=24, choices=ReminderKind.choices, default=ReminderKind.NO_RESPONSE)
+    draft_version: models.PositiveIntegerField[int | None, int | None] = models.PositiveIntegerField(null=True)
     monitor: models.OneToOneField[CaseMonitor, CaseMonitor] = models.OneToOneField(CaseMonitor, on_delete=models.CASCADE)
     due_at: models.DateTimeField[datetime, datetime] = models.DateTimeField()
     revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)

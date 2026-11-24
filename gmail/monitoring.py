@@ -3,6 +3,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager, AbstractAsyncContextManager
 from datetime import datetime
+from dataclasses import replace
 import logging
 
 from asgiref.sync import sync_to_async
@@ -34,6 +35,7 @@ class MonitoringWorker:
 
     async def tick(self, owner_id: str) -> None:
         """Public worker boundary; bounded catch-up, with durable leases and outbox."""
+        await self.store.queue_due_reviews(owner_id, self.clock())
         await self.deliver_pending(owner_id)
         for _ in range(MAX_CASES_PER_TICK):
             job = await self.store.claim(owner_id, self.clock())
@@ -79,7 +81,11 @@ class MonitoringWorker:
                 # Persist BEFORE external handoff. A crash/timeout is ambiguous, never blindly resent.
                 if not await self.store.handoff(identifier, job):
                     continue
-                reply = PreparedReply(text, lambda: self.valid_delivery(job, identifier))
+                async def notification(turn: OwnerTurn, epoch: int) -> str:
+                    return text
+
+                traced = await ApplicationTurn().prepare(replace(job.turn(), text='Deliver scheduled case notification.'), notification)
+                reply = PreparedReply(traced.text, lambda: self.valid_delivery(job, identifier), traced.trace_id)
                 await self.send(reply)
                 await self.store.delivered(identifier)
             except asyncio.CancelledError:

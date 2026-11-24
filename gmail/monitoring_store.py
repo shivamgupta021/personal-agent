@@ -13,7 +13,7 @@ from gmail.monitoring_constants import MAX_FAILURE_DELAY_SECONDS, MAX_NOTIFICATI
 from gmail.monitoring_lifecycle import MonitoringLifecycle
 from gmail.reply_checks import ReplyCheckResult
 from gmail.reminder_store import ReminderStore
-from gmail.reminder_constants import ReminderStatus
+from gmail.reminder_constants import ReminderStatus, ReminderKind
 from gmail.reply_constants import MAX_SEEN_MESSAGES
 from grievances.models import CaseOperationReceipt, CaseSelection, SentReport
 from grievances.mutations import CaseMutation
@@ -187,6 +187,23 @@ class MonitoringStore:
                     text=text[:MAX_NOTIFICATION_CHARS])
 
     @sync_to_async
+    def queue_due_reviews(self, owner_id: str, now: datetime) -> None:
+        with transaction.atomic():
+            CaseOwnership.lock(owner_id)
+            reminders = CaseReminder.objects.select_for_update().select_related('monitor__mailbox_record__case').filter(
+                monitor__mailbox_record__case__owner_id=owner_id, kind=ReminderKind.DRAFT_REVIEW,
+                status=ReminderStatus.PENDING, due_at__lte=now)
+            for reminder in reminders:
+                monitor = reminder.monitor
+                if not self.eligible(monitor):
+                    continue
+                reminder.status = ReminderStatus.QUEUED
+                reminder.save(update_fields=['status'])
+                MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation,
+                    reminder_revision=reminder.revision,
+                    text=f'Reminder: review draft v{reminder.draft_version} for {monitor.mailbox_record.case.label} in Gmail. Nothing was sent. You can ask me to open or revise it.')
+
+    @sync_to_async
     def pending(self, owner_id: str) -> list[tuple[int, MonitorJob, str]]:
         notifications = MonitorNotification.objects.select_related('monitor__mailbox_record__case').filter(
             monitor__mailbox_record__case__owner_id=owner_id, monitor__active=True,
@@ -232,6 +249,6 @@ class MonitoringStore:
         if note is None:
             return False, False
         needs_check = bool(note.reminder_revision and CaseReminder.objects.filter(
-            monitor=note.monitor, revision=note.reminder_revision, status=ReminderStatus.QUEUED).exists())
+            monitor=note.monitor, revision=note.reminder_revision, kind=ReminderKind.NO_RESPONSE, status=ReminderStatus.QUEUED).exists())
         ready = not (needs_check and note.monitor.failures and note.monitor.next_check > now)
         return needs_check, ready
