@@ -30,6 +30,7 @@ class PreparedReply:
     """Response with a fresh authorization check at each external handoff."""
     text: str
     check: Callable[[], Awaitable[bool]]
+    trace_id: str = ''
 
     async def valid(self) -> bool:
         return await self.check()

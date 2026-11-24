@@ -1,6 +1,7 @@
 """Small Telegram Bot API boundary; never expose token-bearing request errors."""
 
 import asyncio
+import re
 from typing import Any
 
 import httpx2
@@ -18,8 +19,9 @@ class TelegramError(RuntimeError):
 
 
 class TelegramClient:
-    def __init__(self, client: httpx2.AsyncClient) -> None:
+    def __init__(self, client: httpx2.AsyncClient, *, trace_base_url: str = '') -> None:
         self.client = client
+        self.trace_base_url = trace_base_url.rstrip('/')
         self._delivery_lock = asyncio.Lock()
 
     async def request(self, method: str, payload: dict[str, Any]) -> Any:
@@ -53,6 +55,9 @@ class TelegramClient:
     async def _send(self, chat_id: int, text: str | PreparedReply) -> None:
         prepared = text if isinstance(text, PreparedReply) else None
         remaining = await prepared.render() if prepared else str(text)
+        if (prepared and self.trace_base_url and re.fullmatch(r'[0-9a-f]{32}', prepared.trace_id)
+                and await prepared.valid()):
+            remaining += f'\n\nTrace: {self.trace_base_url}/{prepared.trace_id}'
         while remaining:
             chunk = remaining.encode('utf-16-le')[:MESSAGE_MAX_UTF16_UNITS * 2].decode('utf-16-le', errors='ignore')
             if len(chunk) < len(remaining):
