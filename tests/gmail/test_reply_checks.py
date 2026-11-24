@@ -33,7 +33,7 @@ class ReplyMailbox(Mailbox):
         if not self.account_valid:
             raise GmailError('Account disconnected or changed')
 
-    def thread(self, thread_id: str, expected_mailbox: str) -> MailResult[ImportedMessage]:
+    def thread(self, thread_id: str, expected_mailbox: str, previous: list[ImportedMessage] | None = None) -> MailResult[ImportedMessage]:
         assert thread_id == 'thread1'
         assert expected_mailbox == 'owner@example.com'
         self.reads += 1

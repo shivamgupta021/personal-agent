@@ -1,5 +1,7 @@
 """Typed mailbox results and persisted correspondence snapshots."""
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from typing import Any
+from attachments.records import AttachmentText
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,15 @@ class ImportedMessage:
     reply_to: str = ''
     rfc_message_id: str = ''
     references: str = ''
+    attachment_results: list[AttachmentText] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'attachment_results', [AttachmentText(**item) if isinstance(item, dict) else item for item in self.attachment_results])
+
+    def evidence(self) -> dict[str, Any]:
+        result = asdict(self)
+        result.pop('attachment_results')  # Cache is storage metadata; text already contains bounded evidence.
+        return result
 
 
 @dataclass(frozen=True)

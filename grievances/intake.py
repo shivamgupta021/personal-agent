@@ -24,6 +24,7 @@ from grievances.policy_store import PolicyStore
 from grievances.progress_store import ProgressSnapshot, ProgressStore
 from grievances.prompts import INTAKE_INSTRUCTIONS, SELECTED_INTAKE_INSTRUCTIONS
 from grievances.schema import IntakeAction
+from grievances.models import CaseMessage
 from grievances.store import CaseStore, CaseView, SelectionView
 from preferences.store import PreferenceStore
 
@@ -149,6 +150,7 @@ class CaseIntake:
         directory: dict[str, object] = {
             'conversation_history': dialogue if conversation is not None else None,
             'reminder': {'kind': reminder.kind, 'draft_version': reminder.draft_version, 'status': reminder.status, 'deadline': reminder.due_at.isoformat(), 'question': reminder.reason} if reminder else None,
+            'has_uploaded_attachments': bool(current and await CaseMessage.objects.filter(case_id=current.id, role='attachment').aexists()),
             'gmail_enabled': await EmailConsent.objects.filter(owner_id=turn.owner_id).aexists(),
             'mail_pending': {'goal': pending.pending_goal, 'question': pending.pending_question, 'choices': pending.candidates} if pending and pending.pending_question else None,
             'current_time': timezone.now().astimezone(ZoneInfo(REMINDER_TIMEZONE)).isoformat(),

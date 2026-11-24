@@ -23,7 +23,8 @@ from gmail.models import CaseMailbox, GmailDraftExport
 from gmail.records import CorrespondenceSnapshot, DraftEnvelope
 from gmail.prompts import GMAIL_DRAFT_INSTRUCTIONS
 from gmail.revisions import DraftRevisions
-from grievances.models import ComplaintDraft, CaseResearch, CaseResearchBrief
+from grievances.models import ComplaintDraft, CaseResearch, CaseResearchBrief, CaseMessage
+from attachments.constants import MAX_FILES
 from grievances.mutations import CaseMutation
 from grievances.store import CaseView, SelectionView
 
@@ -122,8 +123,9 @@ class GmailDraftService:
                 return 'This revision would change the original recipient. Please request a separate draft for the new recipient.'
             policy = await self.policy_snapshot(turn, current)
             previous = await ComplaintDraft.objects.filter(case_id=current.id, case__owner_id=turn.owner_id).order_by('-version').afirst()
+            uploads = await sync_to_async(self.upload_sources)(current.id)
             result = await self.writer.run(json.dumps({'request': {'original_goal': row.pending_goal or turn.text, 'owner_reply': turn.text}, 'facts': current.facts,
-                'reviewed_policy': policy, 'emails': [asdict(item) for item in row.messages], 'truncated': row.truncated,
+                'uploaded_evidence': uploads, 'reviewed_policy': policy, 'emails': [item.evidence() for item in row.messages], 'truncated': row.truncated,
                 'selected_gmail_draft': {'version': source.version, 'subject': source.envelope.subject,
                     'body': source.envelope.body, 'threaded': bool(source.envelope.thread_id), 'provenance': 'Current unsent Gmail draft, including manual edits; not sent correspondence or factual evidence.'} if source else None,
                 'previous_application_draft': {'version': previous.version, 'subject': previous.subject, 'body': previous.body} if previous and not source else None}), usage=usage,
@@ -133,6 +135,7 @@ class GmailDraftService:
             if content.question:
                 return content.question
             sources = {message.message_id: message.subject + '\n' + message.text for message in row.messages}
+            sources.update(uploads)
             if sources and (not content.sources or any(quote.message_id not in sources or
                     quote.quote not in sources[quote.message_id] for quote in content.sources)):
                 return 'I could not verify the draft against the emails. No Gmail draft was created.'
@@ -143,7 +146,7 @@ class GmailDraftService:
                     return 'Changing the subject would break the existing Gmail conversation. No revision was created; request a separate email if you want a different subject.'
                 envelope = replace(source.envelope, subject=content.subject, body=content.body, marker='')
                 await revisions.validate(source)
-            evidence = self.fingerprint([asdict(item) for item in row.messages])
+            evidence = self.fingerprint([[asdict(item) for item in row.messages], uploads])
             export_id, ready = await self.reserve(turn, selection, current, envelope, evidence, policy)
             if not ready:
                 await self.reconcile(export_id)
@@ -218,10 +221,15 @@ class GmailDraftService:
                 thread_id=envelope.thread_id, fingerprint=fingerprint)
             return export.pk, True
 
+    @staticmethod
+    def upload_sources(case_id: str) -> dict[str, str]:
+        return {f'upload:{row.pk}': row.text for row in CaseMessage.objects.filter(
+            case_id=case_id, role='attachment').order_by('-pk')[:MAX_FILES]}
+
     @classmethod
     def check_evidence(cls, current: CaseView, thread: str, evidence: str) -> None:
         mailbox = CaseMailbox.objects.filter(case_id=current.id).first()
-        if mailbox is None or mailbox.selected_thread != thread or cls.fingerprint(mailbox.messages) != evidence:
+        if mailbox is None or mailbox.selected_thread != thread or cls.fingerprint([mailbox.messages, cls.upload_sources(current.id)]) != evidence:
             raise GmailError('The correspondence changed; no draft was created.')
 
     @sync_to_async

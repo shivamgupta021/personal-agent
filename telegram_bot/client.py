@@ -7,6 +7,8 @@ from typing import Any
 import httpx2
 
 from core.turns import PreparedReply
+from attachments.constants import MAX_FILE_BYTES
+from attachments.records import Upload
 
 from telegram_bot.constants import MESSAGE_INTERVAL_SECONDS, MESSAGE_MAX_UTF16_UNITS, POLL_RETRY_SECONDS, POLL_TIMEOUT_SECONDS
 
@@ -47,6 +49,27 @@ class TelegramClient:
         if not isinstance(result, list):
             raise TelegramError('Telegram returned invalid updates.')
         return result
+
+    async def download(self, file_id: str, name: str, mime: str, size: int = 0) -> Upload:
+        if size > MAX_FILE_BYTES:
+            raise TelegramError('This file exceeds the 5 MB reading limit.')
+        metadata = await self.request('getFile', {'file_id': file_id})
+        path = metadata.get('file_path', '')
+        if (not isinstance(path, str) or not re.fullmatch(r'[A-Za-z0-9_./-]+', path)
+                or '..' in path.split('/') or path.startswith('/') or metadata.get('file_size', 0) > MAX_FILE_BYTES):
+            raise TelegramError('Telegram returned an invalid or oversized file.')
+        url = self.client.base_url.copy_with(path='/file' + self.client.base_url.path.rstrip('/') + '/' + path)
+        try:
+            data = bytearray()
+            async with self.client.stream('GET', url, follow_redirects=False) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > MAX_FILE_BYTES:
+                        raise TelegramError('This file exceeds the 5 MB reading limit.')
+            return Upload(name, mime, bytes(data), 'Telegram upload')
+        except httpx2.HTTPError:
+            raise TelegramError('Attachment download failed. Please upload it again.') from None
 
     async def send(self, chat_id: int, text: str | PreparedReply) -> None:
         async with self._delivery_lock:

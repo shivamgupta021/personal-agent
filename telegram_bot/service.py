@@ -5,6 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from core.errors import user_error_message
+from attachments.records import Upload
 from core.turns import OwnerTurn, PreparedReply
 
 from telegram_bot.client import TelegramClient, TelegramError
@@ -38,9 +39,15 @@ class TelegramService:
             if (message.get('from', {}).get('id') != self.owner_id
                     or chat.get('type') != 'private' or chat.get('id') != self.owner_id):
                 continue
-            question = message.get('text')
+            question = message.get('text') or message.get('caption')
+            file = message.get('document')
+            photos = message.get('photo', [])
+            if not file and photos:
+                file = {**photos[-1], 'file_name': 'photo.jpg', 'mime_type': 'image/jpeg'}
             if not isinstance(question, str) or not question.strip():
-                continue
+                if not file:
+                    continue
+                question = 'Read this attachment and summarize the important information.'
             if question.startswith('/'):
                 await self.client.send(self.owner_id,
                     'Create a named grievance case, list or select a case, or send a public research question. '
@@ -49,11 +56,15 @@ class TelegramService:
                 continue
             logger.info('Owner request accepted')
             try:
+                uploads: tuple[Upload, ...] = ()
+                if file:
+                    uploads = (await self.client.download(file['file_id'], file.get('file_name', 'attachment'),
+                        file.get('mime_type', 'application/octet-stream'), file.get('file_size', 0)),)
                 answer = await self.turn_handler(OwnerTurn(self.identity, self.identity,
-                    f'telegram:{update_id}', question))
+                    f'telegram:{update_id}', question, uploads))
             except Exception as error:
                 logger.warning('Request failed; request will not be replayed')
-                answer = user_error_message(error) + ' Please send your question again.'
+                answer = (str(error) if isinstance(error, TelegramError) else user_error_message(error)) + ' Please send your question again.'
             await self.client.send(self.owner_id, answer)
             logger.info('Reply delivered')
 

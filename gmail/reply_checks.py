@@ -15,6 +15,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.tracing import tracing
+from core.workers import drain_on_cancel
 from core.turns import OwnerTurn
 from gmail import constants
 from gmail.errors import GmailError
@@ -48,6 +49,7 @@ class ReplySnapshot:
     sent_matches: tuple[dict[str, str | int], ...] = ()
     findings: tuple[ReplyFinding, ...] = ()
     analysis_fingerprint: str = ''
+    messages: tuple[ImportedMessage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -79,7 +81,7 @@ class GmailReplyChecks:
         try:
             snapshot = await self.snapshot(turn, selection, current)
             with self.mailbox() as mailbox, tracing.operation('gmail.check_replies', {'thread_id': snapshot.thread_id}, private=True) as span:
-                result = await sync_to_async(mailbox.thread)(snapshot.thread_id, snapshot.mailbox)
+                result = await drain_on_cancel(sync_to_async(mailbox.thread)(snapshot.thread_id, snapshot.mailbox, list(snapshot.messages)))
                 tracing.record_output(span, asdict(result))
                 span.set_attribute('gmail.messages', len(result.items))
                 span.set_attribute('gmail.truncated', result.truncated)
@@ -97,7 +99,7 @@ class GmailReplyChecks:
                 findings = list(snapshot.findings)
                 self.validate_findings(incoming, findings)
             elif incoming:
-                analyzed = await self.agent.run(json.dumps({'received_messages': [asdict(message) for message in incoming], 'truncated': result.truncated}),
+                analyzed = await self.agent.run(json.dumps({'received_messages': [message.evidence() for message in incoming], 'truncated': result.truncated}),
                     usage=usage, usage_limits=UsageLimits(request_limit=constants.ASSISTANCE_REQUEST_LIMIT),
                     timeout=constants.ASSISTANCE_TIMEOUT_SECONDS)
                 findings = analyzed.output.findings
@@ -149,7 +151,7 @@ class GmailReplyChecks:
                 seen = tuple(item['message_id'] for item in row.messages)
                 matches = ()
                 findings = ()
-            return ReplySnapshot(row.mailbox, row.selected_thread, seen, self.fingerprint(row), matches, findings, checked.analysis_fingerprint if checked else '')
+            return ReplySnapshot(row.mailbox, row.selected_thread, seen, self.fingerprint(row), matches, findings, checked.analysis_fingerprint if checked else '', tuple(ImportedMessage(**item) for item in row.messages))
 
     @staticmethod
     def validate_findings(messages: list[ImportedMessage], findings: list[ReplyFinding]) -> None:

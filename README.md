@@ -44,6 +44,43 @@ A Gmail web link uses the message ID returned by Google, not the draft container
 
 Revision limits: attachments, Cc/Bcc, HTML-only or oversized draft content stop the revision rather than silently dropping content. Sending remains unavailable. Missing drafts do not prove sending; verification requires matching SENT mail, while owner-reported sending remains a separate source.
 
+### Attachment reading
+
+Send a PDF, PNG/JPEG photo or UTF-8 text file to the Telegram bot with a question
+such as “What is the amount and booking reference?”. It extracts text locally
+(with English OCR for scanned PDFs and images), then uses one model call to answer
+with filename/page references. Subsequent questions can use saved extracted evidence.
+With a case selected, uploads belong to that case and can inform its Gmail drafts;
+otherwise they belong to conversation history. They are evidence, not automatically
+confirmed facts or preferences.
+
+Selected Gmail threads also read supported attachments through the official Gmail
+attachment API. Complete extraction is cached per immutable message part, so
+refreshing the same thread does not repeat OCR. Model inputs retain the existing
+bounded email evidence limits; cache contents do not bypass those limits.
+
+Install the local readers on macOS before starting the bot:
+
+```sh
+brew install poppler tesseract
+uv sync --locked
+```
+
+Limits: 5 MB per file, 8 PDF pages, 8,000 extracted characters per file, and at most
+3 attachments per Gmail thread read. Telegram albums are separate updates, not a
+single combined request. Unsupported, encrypted, corrupt, oversized or partially
+read files produce explicit notices. OCR can misread digits and does not guarantee
+handwriting, tables or visual layout interpretation. Office files, archives, audio
+and video are unsupported. This reads attachments; it does not attach/forward
+original files to outgoing drafts. Existing draft-revision attachment restrictions
+still apply.
+
+Original downloaded bytes live only in memory/temporary extraction files and are
+removed after extraction. Extracted text and Gmail extraction caches live in the
+existing owner/case records and follow their deletion rules. Local tracing capture
+settings apply to extracted evidence; credentials and binary files are never traced.
+Look for `attachment.extract` and `attachment_reader` in the turn's Langfuse trace.
+
 ## Run locally
 
 ```sh
@@ -724,8 +761,8 @@ With Gmail connected, use the private Telegram chat:
    the same request. The planner generates up to three related Gmail API queries, then the app shows at most
    five candidate threads. Broader alternatives run only when the preceding search is empty. Full messages are not read during planning.
 4. Say **Select Gmail candidate REFERENCE**, using the displayed reference. Only
-   then is the full thread requested. Imported plain text is bounded; attachments,
-   remote images and HTML are not read. Truncation is reported.
+   then is the full thread requested. Imported plain text and supported attachments are bounded;
+   remote images are not fetched. Truncation and unread attachments are reported.
 5. Ask **Show selected Gmail correspondence** to inspect saved text with mailbox,
    thread and message references. The selection survives restarts. It is case evidence,
    not confirmed case facts or a preference, and does not enable monitoring.

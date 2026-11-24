@@ -21,7 +21,7 @@ class SuppliedFact(BaseModel):
 
 
 class IntakeAction(BaseModel):
-    action: Literal['preference', 'list_preferences', 'gmail_connect', 'gmail_reminder_set', 'gmail_reminder_status', 'gmail_reminder_cancel', 'gmail_reminder_clarify', 'gmail_monitor_start', 'gmail_monitor_stop', 'gmail_monitor_status', 'case_help', 'gmail_open_draft', 'gmail_check_replies', 'gmail_search', 'gmail_select', 'gmail_show', 'delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'conversation', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
+    action: Literal['read_attachment', 'preference', 'list_preferences', 'gmail_connect', 'gmail_reminder_set', 'gmail_reminder_status', 'gmail_reminder_cancel', 'gmail_reminder_clarify', 'gmail_monitor_start', 'gmail_monitor_stop', 'gmail_monitor_status', 'case_help', 'gmail_open_draft', 'gmail_check_replies', 'gmail_search', 'gmail_select', 'gmail_show', 'delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'conversation', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
     clarification_reason: Literal['unspecified', 'deleted_details'] = Field(default='unspecified',
         description='Use deleted_details only when the owner asks about retrieving details of a deleted case; this selects a fixed explanation, not a deletion action.')
     reminder_kind: Literal['no_response', 'draft_review'] | None = Field(default=None, description='Set for a new purpose; leave null when moving an existing reminder.')

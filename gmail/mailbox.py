@@ -10,6 +10,8 @@ from typing import Any
 import httpx2
 
 from gmail import constants
+from gmail.attachments import GmailAttachments
+from attachments.constants import MAX_FILES
 from gmail.errors import GmailError, DraftOutcomeUnknown
 from gmail.service import GmailService
 from gmail.records import Candidate, ImportedMessage, MailResult, DraftEnvelope, DraftReference
@@ -20,7 +22,7 @@ class Mailbox:
         self.connection = connection
         self.http = http
 
-    def _get(self, path: str, token: str, params: dict[str, str | int] | None = None) -> dict[str, Any]:
+    def _get(self, path: str, token: str, params: dict[str, str | int] | None = None, *, max_bytes: int = constants.MAX_RESPONSE_BYTES) -> dict[str, Any]:
         with self.http.stream('GET', constants.API_URL + path, params=params,
                 headers={'Authorization': 'Bearer ' + token}, follow_redirects=False) as response:
             if response.status_code != 200:
@@ -28,7 +30,7 @@ class Mailbox:
             data = bytearray()
             for chunk in response.iter_bytes():
                 data.extend(chunk)
-                if len(data) > constants.MAX_RESPONSE_BYTES:
+                if len(data) > max_bytes:
                     raise GmailError('Gmail response exceeded the safe size limit. Narrow the search.')
             result = json.loads(data)
             if not isinstance(result, dict):
@@ -63,19 +65,28 @@ class Mailbox:
                     preview=unescape(str(message.get('snippet', '')))[:constants.MAX_PREVIEW_CHARS]))
             return MailResult(connection.email, items, bool(listed.get('nextPageToken')))
 
-    def thread(self, thread_id: str, mailbox: str) -> MailResult[ImportedMessage]:
+    def thread(self, thread_id: str, mailbox: str, previous: list[ImportedMessage] | None = None) -> MailResult[ImportedMessage]:
         with self.connection.connected() as connection:
             if connection.email.casefold() != mailbox.casefold():
                 raise GmailError('The connected mailbox changed. Search again before selecting correspondence.')
             data = self._get('/threads/' + self._identifier(thread_id), str(connection.credentials.token), {'format': 'full'})
             items: list[ImportedMessage] = []
             remaining = constants.MAX_TEXT_CHARS
+            attachment_budget = MAX_FILES
             correspondence = [message for message in data.get('messages', []) if 'DRAFT' not in message.get('labelIds', [])]
             truncated = len(correspondence) > constants.MAX_MESSAGES
             for message in reversed(correspondence[-constants.MAX_MESSAGES:]):
                 payload = message.get('payload', {})
                 headers = self._headers(payload)
                 text, attachments, clipped = self._text(payload)
+                old = next((item for item in previous or [] if item.message_id == message.get('id')), None)
+                extracted = GmailAttachments(self._get).read(payload, self._identifier(message.get('id')),
+                    str(connection.credentials.token), old.attachment_results if old else [], attachment_budget) if attachments else []
+                attachment_budget = max(0, attachment_budget - len(extracted))
+                if extracted:
+                    evidence = '\n\n'.join(item.evidence() for item in extracted)
+                    text = evidence + '\n\nEmail body:\n' + text
+                    attachments = any(item.status != 'read' for item in extracted)
                 allowance = min(remaining, constants.MAX_MESSAGE_TEXT_CHARS)
                 truncated |= clipped or len(text) > allowance
                 items.append(ImportedMessage(message_id=self._identifier(message.get('id')), thread_id=thread_id,
@@ -84,7 +95,7 @@ class Mailbox:
                     date=headers.get('date', '')[:constants.MAX_PREVIEW_CHARS],
                     text=text[:allowance], unread_attachments=attachments, labels=tuple(message.get('labelIds', [])), recipient=headers.get('to', '')[:constants.MAX_ADDRESS_HEADER_CHARS],
                     reply_to=headers.get('reply-to', '')[:constants.MAX_ADDRESS_HEADER_CHARS], rfc_message_id=headers.get('message-id', '')[:constants.MAX_ADDRESS_HEADER_CHARS],
-                    references=headers.get('references', '')[:constants.MAX_REFERENCE_HEADER_CHARS]))
+                    references=headers.get('references', '')[:constants.MAX_REFERENCE_HEADER_CHARS], attachment_results=extracted))
                 remaining = max(0, remaining - min(len(text), allowance))
             return MailResult(connection.email, list(reversed(items)), truncated)
 

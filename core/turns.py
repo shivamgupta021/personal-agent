@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from hashlib import sha256
+from attachments.records import Upload
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,7 @@ class OwnerTurn:
     conversation_id: str
     delivery_id: str
     text: str
+    uploads: tuple[Upload, ...] = ()
 
     def __post_init__(self) -> None:
         if not all((self.owner_id, self.conversation_id, self.delivery_id)):
