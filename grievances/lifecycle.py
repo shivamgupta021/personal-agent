@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 
 from core.tracing import tracing
+from core.capabilities import CapabilityHelp
 from core.email_telemetry import email_private
 from gmail.correspondence import Correspondence
 from core.turns import OwnerTurn, PreparedReply
@@ -42,6 +43,8 @@ class ApplicationTurn:
                 if control is None:
                     if PreferenceInspection.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
                         text = await PreferenceInspection().run(turn)
+                    elif CapabilityHelp.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
+                        text = await CapabilityHelp().run(turn)
                     else:
                         text = await execute(turn, epoch)
                 else:

@@ -1,3 +1,5 @@
+from core.capability_constants import CAPABILITY_DESCRIPTION
+
 CONVERSATION_INSTRUCTIONS = """
 Continue the owner's conversation using the supplied history. Answer conversational
 follow-ups from that history without unnecessary web research. Ask for clarification
@@ -98,7 +100,7 @@ remaining clause; generic references and preservation clauses are allowed.
 Return the structured verdict and a short reason describing the safety condition; do not repeat private values in the reason.
 """
 
-MEMORY_INSTRUCTIONS = """Respond naturally to the owner's general conversation, using its persistent
+MEMORY_INSTRUCTIONS = "Application capabilities: " + CAPABILITY_DESCRIPTION + "\n" + """Respond naturally to the owner's general conversation, using its persistent
 history for follow-ups. Acknowledge supplied context without unnecessary tools or questions.
 Use archive recall when an older detail is missing. Manage general conversation memory
 or saved preferences only when explicitly requested. You have no web tools or grievance
