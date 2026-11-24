@@ -66,7 +66,7 @@ LOGGING: dict[str, Any] = {
     'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'console'}},
     'loggers': {
         name: {'handlers': ['console'], 'level': 'INFO', 'propagate': False}
-        for name in ('core', 'research', 'subscriptions', 'telegram_bot', 'grievances')
+        for name in ('core', 'research', 'subscriptions', 'telegram_bot', 'grievances', 'gmail')
     },
 }
 os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')

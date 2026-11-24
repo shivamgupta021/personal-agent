@@ -2,10 +2,13 @@ import os
 import subprocess
 import sys
 
+import pytest
 
-def test_missing_owner_configuration_fails_before_network_calls() -> None:
+
+@pytest.mark.parametrize('command', ['telegram', 'monitor'])
+def test_missing_owner_configuration_fails_before_network_calls(command: str) -> None:
     result = subprocess.run(
-        [sys.executable, 'manage.py', 'telegram'],
+        [sys.executable, 'manage.py', command],
         env={**os.environ, 'TELEGRAM_BOT_TOKEN': '123:PRIVATE_TOKEN', 'TELEGRAM_OWNER_ID': '',
              'LANGFUSE_PUBLIC_KEY': '', 'LANGFUSE_SECRET_KEY': ''},
         capture_output=True, text=True, timeout=10,

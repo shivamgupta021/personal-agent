@@ -15,13 +15,12 @@ logger = logging.getLogger(__name__)
 
 class TelegramService:
     def __init__(self, client: TelegramClient, state: PollingState, owner_id: int,
-                 turn_handler: Callable[[OwnerTurn], Awaitable[str | PreparedReply]], *, identity: str, background_tick: Callable[[], Awaitable[None]] | None = None) -> None:
+                 turn_handler: Callable[[OwnerTurn], Awaitable[str | PreparedReply]], *, identity: str) -> None:
         self.client = client
         self.state = state
         self.owner_id = owner_id
         self.turn_handler = turn_handler
         self.identity = identity
-        self.background_tick = background_tick
         if not identity:
             raise ValueError('Normalized turns require the bot/owner identity')
 
@@ -64,11 +63,6 @@ class TelegramService:
             while True:
                 try:
                     await self.poll_once()
-                    if self.background_tick:
-                        try:
-                            await self.background_tick()
-                        except Exception:
-                            logger.warning("Background monitoring unavailable; retrying on next poll")
                 except TelegramError as error:
                     if not error.retryable:
                         logger.error('Telegram configuration failed; check token, permissions, webhook and other pollers')
