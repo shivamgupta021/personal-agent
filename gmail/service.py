@@ -11,7 +11,7 @@ from google.oauth2.credentials import Credentials
 from gmail.client import GoogleClient
 from gmail.constants import SCOPES, COMPOSE_SCOPES, COMPOSE_SCOPE, TOKEN_URL
 from gmail.credentials import Connection, CredentialStore
-from gmail.errors import GmailError
+from gmail.errors import GmailError, GmailDisconnected
 
 
 class GmailService:
@@ -79,7 +79,7 @@ class GmailService:
         with self.operation():
             connection = self.store.load()
             if connection is None:
-                raise GmailError('Gmail is not connected. Run gmail_connect first.')
+                raise GmailDisconnected('Gmail is not connected.')
             self.validate(connection.credentials)
             if not connection.credentials.valid:
                 self.client.refresh(connection.credentials)
@@ -88,6 +88,12 @@ class GmailService:
             if self.client.profile(connection.credentials).casefold() != connection.email.casefold():
                 raise GmailError('Gmail account verification changed. Reconnect before using it.')
             yield connection
+
+    def require_connection(self) -> None:
+        """Reject a missing local grant before spending tokens planning a search."""
+        with self.operation():
+            if self.store.load() is None:
+                raise GmailDisconnected('Gmail is not connected.')
 
     def status(self) -> str:
         # A disconnected status is informational, not a failed operation.

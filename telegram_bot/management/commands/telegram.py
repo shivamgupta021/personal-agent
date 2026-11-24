@@ -3,6 +3,7 @@
 import asyncio
 import signal
 from argparse import ArgumentParser
+from pathlib import Path
 from typing import Any
 
 import httpx2
@@ -11,6 +12,7 @@ from django.core.management.base import BaseCommand
 
 from core.commands import run_async
 from gmail.factory import GmailFactory
+from gmail.onboarding import GmailOnboarding
 from gmail.monitoring import MonitoringWorker
 from gmail.scheduler import MonitoringScheduler
 from telegram_bot.runtime import ApplicationRuntime
@@ -41,12 +43,15 @@ class Command(BaseCommand):
         subscription = SubscriptionService(settings.SUBSCRIPTION_STATE_DIR)
         research = ResearchService(subscription)
         owner_identity = configuration.owner_identity
-        application = SubscriptionApplicationService(subscription, ConversationService(owner_identity, research).run)
         async with httpx2.AsyncClient(
             base_url=f'https://api.telegram.org/bot{token}/', timeout=HTTP_TIMEOUT_SECONDS,
             follow_redirects=False,
         ) as client:
             telegram = TelegramClient(client, trace_base_url=settings.TELEGRAM_TRACE_BASE_URL)
+            onboarding = GmailOnboarding(GmailFactory.connection, Path(settings.GMAIL_CLIENT_FILE),
+                lambda message: telegram.send(owner_id, message))
+            application = SubscriptionApplicationService(subscription,
+                ConversationService(owner_identity, research).run, onboarding.connect)
             chat = TelegramService(telegram, state, owner_id, turn_handler=application.prepare,
                 identity=owner_identity)
             stop = asyncio.Event()

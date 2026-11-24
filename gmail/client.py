@@ -36,7 +36,7 @@ class GoogleClient:
         try:
             return cast(Credentials, flow.run_local_server(host='127.0.0.1', bind_addr='127.0.0.1', port=0,
                 timeout_seconds=constants.CONSENT_TIMEOUT_SECONDS, authorization_prompt_message=None,
-                success_message='Consent received. Return to your terminal to check connection verification.',
+                success_message='Consent received. Return to the assistant to check connection verification.',
                 prompt='consent', login_hint=expected_email))
         finally:
             flow.oauth2session.close()

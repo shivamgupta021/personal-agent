@@ -10,8 +10,9 @@ from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, Usage
 from pydantic_ai.models import Model
 
 from gmail.assistance import CaseAssistance
+from gmail.onboarding import GmailConnectionRequested, ConnectionAttempt
 from gmail.drafts import GmailDraftService
-from gmail.correspondence import Correspondence
+from gmail.correspondence import Correspondence, CONSENT_MESSAGE
 from gmail.factory import GmailFactory
 from gmail.planner import GmailQueryPlanner
 from gmail.reply_checks import GmailReplyChecks
@@ -84,6 +85,14 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
+        if action.action == 'gmail_connect':
+            if (not action.gmail_account or action.gmail_account not in turn.text
+                    or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', action.gmail_account)
+                    or not action.intent_quote or action.intent_quote not in turn.text):
+                return 'Which Gmail address should I connect? Please include it in your reply.'
+            if action.gmail_compose and not re.search(r'\b(draft|drafts|compose)\b', turn.text, re.IGNORECASE):
+                return 'Do you want read-only access, or also permission to create Gmail drafts?'
+            raise GmailConnectionRequested(action.gmail_account, action.gmail_compose)
         if action.action.startswith('gmail_reminder_'):
             if action.case_id and action.case_id != selection.case_id:
                 target = await self.store.get_case(turn.owner_id, action.case_id)
@@ -222,8 +231,10 @@ class PublicResearchRequested(Exception):
 class SubscriptionApplicationService:
     """Open the subscription transport for one normalized application turn."""
 
-    def __init__(self, subscription: SubscriptionService, public_run: Callable[[str], Awaitable[str]]) -> None:
+    def __init__(self, subscription: SubscriptionService, public_run: Callable[[str], Awaitable[str]],
+                 connect_gmail: Callable[[OwnerTurn, str, bool], Awaitable[ConnectionAttempt]] | None = None) -> None:
         self.subscription = subscription
+        self.connect_gmail = connect_gmail
         self.public_run = public_run
 
     async def run(self, turn: OwnerTurn) -> str:
@@ -238,7 +249,22 @@ class SubscriptionApplicationService:
         try:
             async with self.subscription.model() as model:
                 return await ApplicationService(model, self.defer_public,
-                    correspondence=Correspondence(GmailFactory.mailbox, GmailQueryPlanner(model)))._execute(turn, epoch)
+                    correspondence=Correspondence(GmailFactory.mailbox, GmailQueryPlanner(model), GmailFactory.require_connection))._execute(turn, epoch)
+        except GmailConnectionRequested as request:
+            if self.connect_gmail is None:
+                return 'Gmail connection setup is available through the Telegram application on this Mac.'
+            connected = await self.connect_gmail(turn, request.email, request.compose)
+            if not connected.connected:
+                return connected.message
+            if epoch != await CaseOwnership().epoch(turn.owner_id):
+                return connected.message + ' The case changed; please send a new request.'
+            pending = await Correspondence().pending_goal(turn)
+            if pending and await Correspondence.consented(turn.owner_id):
+                resumed = await self._execute(replace(turn.followup(), text=pending), epoch)
+                return connected.message + '\n\n' + resumed
+            if pending:
+                return connected.message + '\n\n' + CONSENT_MESSAGE
+            return connected.message + ' Tell me which email or case you need help with.'
         except PublicResearchRequested:
             if epoch != await CaseOwnership().epoch(turn.owner_id):
                 return 'Case content was deleted. Please send a new public request.'

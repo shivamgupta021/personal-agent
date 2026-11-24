@@ -45,3 +45,7 @@ MAX_REFERENCE_HEADER_CHARS = 4000
 DRAFT_MAX_QUOTE_CHARS = 2000
 DRAFT_MAX_SOURCES = 20
 DRAFT_MAX_QUESTION_CHARS = 400
+
+CONNECT_MESSAGE = ("Gmail isn’t connected yet. Which Gmail address should I connect? "
+    "I’ll open Google consent on this Mac, then continue with your request. "
+    "You can say ‘Connect Gmail for name@example.com’. No terminal command is needed.")
