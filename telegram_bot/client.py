@@ -20,6 +20,7 @@ class TelegramError(RuntimeError):
 class TelegramClient:
     def __init__(self, client: httpx2.AsyncClient) -> None:
         self.client = client
+        self._delivery_lock = asyncio.Lock()
 
     async def request(self, method: str, payload: dict[str, Any]) -> Any:
         try:
@@ -46,6 +47,10 @@ class TelegramClient:
         return result
 
     async def send(self, chat_id: int, text: str | PreparedReply) -> None:
+        async with self._delivery_lock:
+            await self._send(chat_id, text)
+
+    async def _send(self, chat_id: int, text: str | PreparedReply) -> None:
         prepared = text if isinstance(text, PreparedReply) else None
         remaining = await prepared.render() if prepared else str(text)
         while remaining:

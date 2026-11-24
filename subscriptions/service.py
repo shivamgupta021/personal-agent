@@ -1,5 +1,6 @@
 """Subscription operations and authenticated model construction."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,7 @@ from subscriptions.auth import SubscriptionSession
 class SubscriptionService:
     def __init__(self, state_dir: Path) -> None:
         self.session = SubscriptionSession(state_dir)
+        self._model_access = asyncio.Lock()
 
     async def login(self) -> None:
         with self.session.locked():
@@ -48,9 +50,11 @@ class SubscriptionService:
 
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[AsyncOpenAI]:
-        with self.session.locked():
-            await self.session.credentials.load()
-            async with self.session.provider().client.with_options(
-                max_retries=constants.MODEL_HTTP_RETRIES, timeout=constants.MODEL_TIMEOUT_SECONDS,
-            ) as client:
-                yield client
+        # Chat and monitoring share this service; external processes still fail fast.
+        async with self._model_access:
+            with self.session.locked():
+                await self.session.credentials.load()
+                async with self.session.provider().client.with_options(
+                    max_retries=constants.MODEL_HTTP_RETRIES, timeout=constants.MODEL_TIMEOUT_SECONDS,
+                ) as client:
+                    yield client

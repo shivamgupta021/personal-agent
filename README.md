@@ -12,7 +12,7 @@ A local Django project with a real research agent using your ChatGPT subscriptio
 | Unsent Gmail drafts | Implemented; synthetic real-model experiment and live Telegram → unsent Gmail draft acceptance passed (#45) |
 | Revisions preserving manual Gmail edits | Implemented (#46); reads the selected Gmail draft and creates a new version; live acceptance recorded below |
 | On-demand reply and sent-state checks | Implemented (#47); selected thread only, separate verified and owner-reported status |
-| Background monitoring and reminders | Not implemented (#48–#49) |
+| Background monitoring and reminders | Implemented (#48–#49); independent scheduler bundled with `telegram` |
 
 Test the user experience in the private Telegram bot, not with internal candidate IDs:
 
@@ -769,17 +769,43 @@ Deep-link, revision (#46), and on-demand reply-check (#47) acceptance:
 
 ### Local reply monitoring (#48)
 
-The existing `uv run python manage.py telegram` process also runs bounded monitoring
-checks between Telegram polls. No additional hosted worker or Gmail webhook is required.
-After selecting a case with imported correspondence, say “Watch this case for new
-replies.” Ask “Is monitoring on?” or “Stop monitoring this case.”
+Start the whole local application with one command:
 
-Monitoring is explicit per case and checks only its selected thread, approximately
-every five minutes while the Mac is awake and the bot runs. Long foreground requests
-can delay checks. A restart catches up with bounded reads; original thread limits and
-unread-attachment caveats still apply. Unchanged messages reuse validated classification
-rather than invoking the model on every poll. Monitoring never drafts, sends email,
-or resolves a case. One-time deadline reminders are a separate milestone (#49).
+```bash
+uv run python manage.py telegram
+```
+
+It runs Telegram polling and monitoring as independent async loops in one process.
+The scheduler checks for due work every 60 seconds; each selected case is normally
+checked every five minutes. Chat and monitoring share queued subscription access:
+a check can wait for a model call, but does not require a separate terminal or fail
+merely because the other loop is using the model. Telegram replies and notifications
+are serialized so long-message chunks do not interleave.
+
+Active case-help thread selection enables monitoring unless the owner previously
+stopped it. Ask “Is monitoring on?” or “Stop monitoring this case.” No Pub/Sub,
+webhook, IMAP or SMTP setup is required. Stop and restart an older bot before using
+this version. Never run old and new pollers together.
+
+For separately managed deployments only, `telegram --chat-only` disables bundled
+monitoring and `monitor` runs the scheduler alone. Separate processes still share a
+fail-fast subscription file lock and do not share the in-process delivery queue. `monitor --once` processes one bounded tick,
+including due notification delivery; it is not a dry run.
+
+The scheduler is single-host: use one instance with the same state directory.
+An exclusive file lock rejects a second worker. Multiple hosts or different state
+directories against one database are not supported.
+`.local/telegram/<bot-identity>/monitor/heartbeat.json` records the process ID,
+last stage and timestamp without mailbox content. A stale `checking` timestamp
+alone does not distinguish a slow check from a crash. In the combined application,
+SIGTERM and Ctrl-C cancel both loops and release their locks; interrupted chat
+requests retain the manual-resend policy. The standalone monitor finishes its
+current tick on SIGTERM. Both require an awake computer.
+
+A restart catches up with bounded reads; original thread limits and unread-attachment
+caveats still apply. Unchanged messages reuse validated classification rather than
+invoking the model on every poll. Monitoring never drafts, sends email, or resolves
+a case. No-response reminders retain their separately agreed deadlines.
 
 `CaseMonitor` and `MonitorNotification` persist in PostgreSQL. Notifications are queued
 transactionally with seen-message progress and marked attempted before Telegram handoff.
