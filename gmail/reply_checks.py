@@ -46,6 +46,14 @@ class ReplySnapshot:
     seen: tuple[str, ...]
     fingerprint: str
     sent_matches: tuple[dict[str, str | int], ...] = ()
+    findings: tuple[ReplyFinding, ...] = ()
+
+
+@dataclass(frozen=True)
+class ReplyCheckResult:
+    answer: str
+    verified: bool = False
+    findings: tuple[ReplyFinding, ...] = ()
 
 
 class GmailReplyChecks:
@@ -58,8 +66,12 @@ class GmailReplyChecks:
 
     async def run(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
                   usage: RunUsage | None = None) -> str:
+        return (await self.check(turn, selection, current, usage)).answer
+
+    async def check(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
+                    usage: RunUsage | None = None, *, reuse_analysis: bool = False) -> ReplyCheckResult:
         if not await EmailConsent.objects.filter(owner_id=turn.owner_id).aexists():
-            return 'Please enable email processing before I inspect your correspondence.'
+            return ReplyCheckResult('Please enable email processing before I inspect your correspondence.')
         try:
             snapshot = await self.snapshot(turn, selection, current)
             with self.mailbox() as mailbox, tracing.operation('gmail.check_replies', {'thread_id': snapshot.thread_id}, private=True) as span:
@@ -77,7 +89,10 @@ class GmailReplyChecks:
             incoming = [message for message in messages if 'DRAFT' not in message.labels
                 and self.addresses(message.sender) != [snapshot.mailbox.casefold()]]
             findings: list[ReplyFinding] = []
-            if incoming:
+            if reuse_analysis and incoming and {item.message_id for item in incoming} == {item.message_id for item in snapshot.findings}:
+                findings = list(snapshot.findings)
+                self.validate_findings(incoming, findings)
+            elif incoming:
                 analyzed = await self.agent.run(json.dumps({'request': turn.text,
                     'received_messages': [asdict(message) for message in incoming], 'truncated': result.truncated}),
                     usage=usage, usage_limits=UsageLimits(request_limit=constants.ASSISTANCE_REQUEST_LIMIT),
@@ -94,9 +109,9 @@ class GmailReplyChecks:
             with self.mailbox() as mailbox:
                 await sync_to_async(mailbox.verify_account)(snapshot.mailbox)
             await self.save(turn, selection, current, snapshot, result, findings, sent_matches, answer)
-            return answer
+            return ReplyCheckResult(answer, True, tuple(findings))
         except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
-            return 'I could not verify the reply status just now. The previous record is unchanged; please try again.'
+            return ReplyCheckResult('I could not verify the reply status just now. The previous record is unchanged; please try again.')
 
     @staticmethod
     def addresses(value: str) -> list[str]:
@@ -119,10 +134,12 @@ class GmailReplyChecks:
             if checked and checked.mailbox == row.mailbox and checked.thread_id == row.selected_thread:
                 seen = tuple(checked.seen_message_ids)
                 matches = tuple(checked.sent_matches)
+                findings = tuple(ReplyFinding.model_validate(item) for item in checked.findings)
             else:
                 seen = tuple(item['message_id'] for item in row.messages)
                 matches = ()
-            return ReplySnapshot(row.mailbox, row.selected_thread, seen, self.fingerprint(row), matches)
+                findings = ()
+            return ReplySnapshot(row.mailbox, row.selected_thread, seen, self.fingerprint(row), matches, findings)
 
     @staticmethod
     def validate_findings(messages: list[ImportedMessage], findings: list[ReplyFinding]) -> None:

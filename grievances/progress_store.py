@@ -6,6 +6,8 @@ import re
 from asgiref.sync import sync_to_async
 
 from core.turns import OwnerTurn
+from gmail.models import CaseMonitor
+from django.db.models import F
 from grievances.mutations import CaseMutation
 from grievances.correspondence import ParsedCompanyReply
 from grievances.models import CaseOutcome, CompanyReply, ComplaintDraft, GrievanceCase, SentReport
@@ -153,6 +155,8 @@ class ProgressStore:
             CaseOutcome.objects.create(case=case, operation=receipt, outcome=outcome, owner_quote=intent_quote)
             case.status = outcome
             case.save(update_fields=['status'])
+            CaseMonitor.objects.filter(mailbox_record__case=case, active=True).update(
+                active=False, generation=F('generation') + 1, stopped_reason='case closed')
             self._advance(case)
             return 'Recorded your explicit case outcome: ' + outcome.replace('_', ' ') + '.'
 

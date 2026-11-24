@@ -4,7 +4,7 @@ from contextlib import contextmanager
 import fcntl
 import os
 from pathlib import Path
-from collections.abc import Iterator
+from collections.abc import Iterator, Callable
 
 from google.oauth2.credentials import Credentials
 
@@ -15,10 +15,11 @@ from gmail.errors import GmailError
 
 
 class GmailService:
-    def __init__(self, store: CredentialStore, client: GoogleClient, directory: Path) -> None:
+    def __init__(self, store: CredentialStore, client: GoogleClient, directory: Path, *, disable_monitoring: Callable[[], None] | None = None) -> None:
         self.store = store
         self.client = client
         self.directory = directory
+        self.disable_monitoring = disable_monitoring
 
     @contextmanager
     def operation(self) -> Iterator[None]:
@@ -67,6 +68,8 @@ class GmailService:
             actual_email = self.client.profile(credentials)
             if actual_email.casefold() != expected_email.casefold():
                 raise GmailError('The selected Google account does not match --email. The previous connection was preserved.')
+            if previous and previous.email.casefold() != actual_email.casefold() and self.disable_monitoring:
+                self.disable_monitoring()
             self.store.save(Connection(actual_email, credentials))
             return f'Connected Gmail: {actual_email}. ' + ('Reading and draft creation enabled; nothing sent.' if compose else 'Read-only access; no messages were fetched.')
 
@@ -102,6 +105,8 @@ class GmailService:
                 connection = self.store.load()
             except Exception:
                 connection = None
+            if self.disable_monitoring:
+                self.disable_monitoring()
             self.store.disable()
             revoked = False
             if connection is not None:

@@ -9,6 +9,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from core.commands import run_async
+from gmail.factory import GmailFactory
+from gmail.monitoring import MonitoringWorker
 from conversations.service import ConversationService
 from research.service import ResearchService
 from grievances.service import SubscriptionApplicationService
@@ -44,4 +46,8 @@ class Command(BaseCommand):
             base_url=f'https://api.telegram.org/bot{token}/', timeout=HTTP_TIMEOUT_SECONDS,
             follow_redirects=False,
         ) as client:
-            await TelegramService(TelegramClient(client), state, owner_id, turn_handler=application.prepare, identity=owner_identity).run()
+            telegram = TelegramClient(client)
+            monitor = MonitoringWorker(subscription.model, GmailFactory.mailbox,
+                lambda reply: telegram.send(owner_id, reply))
+            await TelegramService(telegram, state, owner_id, turn_handler=application.prepare,
+                identity=owner_identity, background_tick=lambda: monitor.tick(owner_identity)).run()

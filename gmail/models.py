@@ -47,3 +47,25 @@ class GmailReplyCheckState(models.Model):
     mailbox: models.EmailField[str, str] = models.EmailField(default='')
     thread_id: models.CharField[str, str] = models.CharField(max_length=128, default='')
     updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now=True)
+
+
+class CaseMonitor(models.Model):
+    mailbox_record: models.OneToOneField[CaseMailbox, CaseMailbox] = models.OneToOneField(CaseMailbox, on_delete=models.CASCADE)
+    active: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    mailbox: models.EmailField[str, str] = models.EmailField()
+    thread_id: models.CharField[str, str] = models.CharField(max_length=128)
+    seen_message_ids = models.JSONField(default=list)
+    next_check: models.DateTimeField[datetime, datetime] = models.DateTimeField()
+    failures: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    failure_alerted: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    stopped_reason: models.CharField[str, str] = models.CharField(max_length=64, default='')
+
+
+class MonitorNotification(models.Model):
+    monitor: models.ForeignKey[CaseMonitor, CaseMonitor] = models.ForeignKey(CaseMonitor, on_delete=models.CASCADE)
+    generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    text: models.TextField[str, str] = models.TextField()
+    attempted: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    delivered: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)

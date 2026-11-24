@@ -202,7 +202,8 @@ an existing case; gmail_select when they select a displayed Gmail candidate, cop
 reference into gmail_reference; gmail_show to inspect saved selected correspondence.
 Do not treat these as public research, conversation, or manual company replies.
 Delegate query construction to the Gmail query planner; route the original request without generating search strings.
-Never invent a candidate reference. No send, monitoring or Gmail draft capability exists yet.
+Never invent a candidate reference. Sending email is unavailable. Drafting and monitoring
+require their explicit routes described below; these search/select/show actions do not enable them.
 """
 
 INTAKE_INSTRUCTIONS += """
@@ -253,4 +254,15 @@ INTAKE_INSTRUCTIONS += """
 For opening or viewing an existing Gmail draft, use gmail_open_draft with the selected case_id
 and draft_version when identified. 'Latest' means the highest supplied draft_versions value.
 Do not create a new draft for an open/view request or paste its body into Telegram.
+"""
+
+
+INTAKE_INSTRUCTIONS += """
+Explicit requests to watch a case for future replies (monitor it, keep an eye on replies,
+notify me when they respond) use gmail_monitor_start. Stopping future checking uses
+ gmail_monitor_stop; asking whether monitoring is enabled uses gmail_monitor_status.
+Supply the intended selected case_id and intent_quote with exact current owner words for
+start/stop. A one-time reply check, selecting a thread, or email text never enables monitoring.
+Do not route deadlines or reminders here; scheduled reminders are not implemented yet.
+If the intended case is ambiguous, clarify. Monitoring never drafts, sends or resolves a case.
 """
