@@ -13,7 +13,8 @@ owner clarified that normal local use must not require two separate processes.
   behavior remain intact. No IMAP, SMTP or Pub/Sub setup is added.
 - Chat and monitoring share queued access to the subscription session in this
   process. Separate commands retain the existing fail-fast lock behavior.
-- Long Telegram responses and notifications must not interleave message chunks.
+- In the combined application, long Telegram responses and notifications must not
+  interleave message chunks. Separately managed processes do not share that queue.
 - Worker ownership is exclusive per local state directory, with a content-free
   heartbeat. This does not provide distributed ownership across hosts.
 - Fatal loop exit stops the combined application visibly. Shutdown cancels both

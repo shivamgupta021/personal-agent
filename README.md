@@ -789,7 +789,7 @@ this version. Never run old and new pollers together.
 
 For separately managed deployments only, `telegram --chat-only` disables bundled
 monitoring and `monitor` runs the scheduler alone. Separate processes still share a
-fail-fast subscription file lock. `monitor --once` processes one bounded tick,
+fail-fast subscription file lock and do not share the in-process delivery queue. `monitor --once` processes one bounded tick,
 including due notification delivery; it is not a dry run.
 
 The scheduler is single-host: use one instance with the same state directory.

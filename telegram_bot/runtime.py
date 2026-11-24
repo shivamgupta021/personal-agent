@@ -23,6 +23,6 @@ class ApplicationRuntime:
                     if not stop.is_set():
                         raise RuntimeError('An application worker stopped unexpectedly. Restart the application.')
         finally:
-            for task in [*tasks, stopping]:
-                task.cancel()
+            for pending in [*tasks, stopping]:
+                pending.cancel()
             await asyncio.gather(*tasks, stopping, return_exceptions=True)
