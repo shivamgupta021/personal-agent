@@ -15,7 +15,7 @@ from gmail import constants
 from gmail.correspondence import Correspondence
 from gmail.drafts import GmailDraftService
 from gmail.records import CorrespondenceSnapshot
-from gmail.errors import GmailDisconnected
+from gmail.errors import GmailDisconnected, GmailError
 from gmail.prompts import MAIL_BRIEF_INSTRUCTIONS, MAIL_MATCH_INSTRUCTIONS
 from grievances.schema import IntakeAction
 from grievances.store import CaseStore, CaseView, SelectionView
@@ -79,6 +79,8 @@ class CaseAssistance:
             except GmailDisconnected:
                 await self.correspondence.remember_goal(turn, selection, current, constants.CONNECT_MESSAGE)
                 return constants.CONNECT_MESSAGE
+            except GmailError:
+                return 'I could not check the Gmail connection just now. Please try again; no emails were read or sent.'
         if not await self.correspondence.consented(turn.owner_id):
             await self.correspondence.remember_goal(turn, selection, current)
             return await self.correspondence.run(turn, 'gmail_search', selection, current)

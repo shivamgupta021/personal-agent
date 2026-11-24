@@ -79,8 +79,9 @@ def test_connection_runs_after_releasing_model_session(tmp_path: Path, monkeypat
 
 
 @pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('connection_unavailable', [False, True])
 def test_missing_connection_saves_goal_without_planning_and_resumes_after_consent(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, connection_unavailable: bool) -> None:
     connected = False
     routed: list[str] = []
     original = 'Help me with my Hosteller refund'
@@ -103,6 +104,8 @@ def test_missing_connection_saves_goal_without_planning_and_resumes_after_consen
         yield FunctionModel(respond)
 
     def require_connection() -> None:
+        if connection_unavailable:
+            raise GmailError('SECRET Keychain failure')
         if not connected:
             raise GmailDisconnected('Missing local grant')
 
@@ -120,6 +123,11 @@ def test_missing_connection_saves_goal_without_planning_and_resumes_after_consen
 
     async def scenario() -> None:
         first = await service.run(OwnerTurn('owner', 'owner', 'first', original))
+        if connection_unavailable:
+            assert 'could not check the Gmail connection' in first
+            assert 'SECRET' not in first
+            assert routed == [original]
+            return
         assert 'Which Gmail address' in first
         assert routed == [original]  # No Gmail query planning spent on a missing grant.
         reply = await service.run(OwnerTurn('owner', 'owner', 'connect', 'Connect Gmail for owner@example.com'))
