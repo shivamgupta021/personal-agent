@@ -18,6 +18,7 @@ from conversations.facts import ConversationEditRejected, EditIntent, EditResult
 from preferences import constants
 from preferences.prompts import PREFERENCE_AUTHORIZATION, PREFERENCE_CONTEXT
 from preferences.store import Preference, PreferenceStore
+from preferences.inspection import PreferenceInspection
 from research.constants import MAX_MODEL_REQUESTS
 from core.tracing import tracing
 
@@ -76,8 +77,7 @@ class PreferenceService:
         if intent.action in ('none', 'clarify'):
             return EditResult('clarify', intent.question or 'Should this be a lasting saved preference, or only for this task?')
         if intent.action == 'list':
-            text = '\n'.join(f'{p.key.replace("_", " ")}: {p.value}' for p in self.current)
-            receipt = 'Saved preferences:\n' + text if text else 'No saved preferences.'
+            receipt = PreferenceInspection.render(self.current)
             await self.persist_reply(receipt)
             raise PreferenceReply(receipt)
         if not intent.key or not intent.consent_quote or intent.consent_quote not in self.facts.request:

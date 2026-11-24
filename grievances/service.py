@@ -25,6 +25,7 @@ from grievances.ownership import CaseOwnership
 from grievances.deletion import CaseDeletionService
 from grievances.cleanup import CaseTraceCleanup
 from core.tracing import tracing
+from preferences.inspection import PreferenceInspection
 from grievances import constants
 from grievances.drafts import DraftService
 from grievances.policy import PolicyResearchService, PublicResearchBoundary
@@ -201,6 +202,10 @@ class ApplicationService:
             return await self.store.read_drafts(turn, selection, current, action.draft_version, listing=action.action == 'list_drafts')
         if action.action in GENERAL_ACTIONS and not await self.store.general_allowed(turn, epoch):
             return 'Case material cannot become general memory or public research. Please send a new independent request.'
+        if action.action == 'list_preferences':
+            if action.facts:
+                return 'Case facts cannot become general memory. Please ask separately about saved preferences.'
+            return await PreferenceInspection().run(turn)
         if action.action in ('conversation', 'memory'):
             if action.facts:
                 return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'
