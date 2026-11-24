@@ -9,7 +9,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.function import FunctionModel, AgentInfo
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from conversations.models import ConversationRecord
-from grievances.models import GrievanceCase, CaseSelection
+from grievances.models import GrievanceCase, CaseSelection, CaseFactRevision
 
 from core.turns import OwnerTurn
 from grievances.service import SubscriptionApplicationService
@@ -76,3 +76,25 @@ def test_unfamiliar_and_mixed_requests_keep_routing(tmp_path: Path, monkeypatch:
     if route == 'list_preferences':
         assert answer == 'No saved preferences.'
     assert not SavedPreference.objects.exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_router_cannot_copy_case_identifiers_into_preference_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    case = GrievanceCase.objects.create(owner_id='owner', label='Refund', label_key='refund')
+    CaseFactRevision.objects.create(case=case, revision=1, facts={'order_reference': 'PRIVATE-123'})
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': 'list_preferences'})])
+
+    @asynccontextmanager
+    async def model(self: SubscriptionService, name: str = '') -> AsyncIterator[Model]:
+        yield FunctionModel(respond)
+
+    async def public(message: str) -> str:
+        raise AssertionError('No public access')
+
+    monkeypatch.setattr(SubscriptionService, 'model', model)
+    app = SubscriptionApplicationService(SubscriptionService(tmp_path), public)
+    answer = asyncio.run(app.run(OwnerTurn('owner', 'owner', 'private', 'Show my saved preferences for order PRIVATE-123')))
+    assert 'Case material cannot become general memory' in answer
+    assert not any('PRIVATE-123' in str(r.history) for r in ConversationRecord.objects.all())

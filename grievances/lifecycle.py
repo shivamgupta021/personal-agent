@@ -10,6 +10,7 @@ from preferences.inspection import PreferenceInspection
 from grievances.cleanup import CaseTraceCleanup
 from grievances.deletion import CaseDeletionService
 from grievances.ownership import CaseOwnership
+from grievances.store import CaseStore
 from grievances.trace_lifecycle import ApplicationTrace
 
 
@@ -39,7 +40,7 @@ class ApplicationTurn:
                 tracing.record_input(span, {'message': turn.text})
                 control = await self.deletion.control(turn)
                 if control is None:
-                    if PreferenceInspection.matches(turn.text):
+                    if PreferenceInspection.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
                         text = await PreferenceInspection().run(turn)
                     else:
                         text = await execute(turn, epoch)

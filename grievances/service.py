@@ -86,8 +86,6 @@ class ApplicationService:
             return intake
         action, selection, current = intake.action, intake.selection, intake.current
         usage, company_reply = intake.usage, intake.company_reply
-        if action.action == 'list_preferences':
-            return await PreferenceInspection().run(turn)
         if action.action == 'gmail_connect':
             if (not action.gmail_account or action.gmail_account not in turn.text
                     or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', action.gmail_account)
@@ -204,6 +202,10 @@ class ApplicationService:
             return await self.store.read_drafts(turn, selection, current, action.draft_version, listing=action.action == 'list_drafts')
         if action.action in GENERAL_ACTIONS and not await self.store.general_allowed(turn, epoch):
             return 'Case material cannot become general memory or public research. Please send a new independent request.'
+        if action.action == 'list_preferences':
+            if action.facts:
+                return 'Case facts cannot become general memory. Please ask separately about saved preferences.'
+            return await PreferenceInspection().run(turn)
         if action.action in ('conversation', 'memory'):
             if action.facts:
                 return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'

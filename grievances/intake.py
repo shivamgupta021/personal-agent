@@ -28,7 +28,7 @@ DRAFT_ACTIONS = frozenset(('draft', 'list_drafts', 'read_draft'))
 POLICY_ACTIONS = frozenset(('review_research', 'confirm_research', 'research'))
 PROGRESS_ACTIONS = frozenset(('record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up'))
 SELECTED_ACTIONS = frozenset(('show', 'update')) | DRAFT_ACTIONS | POLICY_ACTIONS | PROGRESS_ACTIONS
-GENERAL_ACTIONS = frozenset(('conversation', 'memory', 'public'))
+GENERAL_ACTIONS = frozenset(('conversation', 'memory', 'public', 'list_preferences'))
 
 
 @dataclass(frozen=True)
