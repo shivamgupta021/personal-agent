@@ -50,24 +50,30 @@ class MonitoringWorker:
             await self.deliver_pending(owner_id)
 
     async def check(self, job: MonitorJob, turn: OwnerTurn) -> str:
+        return (await self.check_result(job, turn)).answer
+
+    async def check_result(self, job: MonitorJob, turn: OwnerTurn) -> ReplyCheckResult:
         with tracing.operation('gmail.monitor', {'case_id': job.case_id, 'thread_id': job.thread_id}, private=True) as span:
             if not await self.store.valid(job):
                 tracing.record_output(span, {'status': 'cancelled'})
-                return 'Monitoring was stopped or the case changed.'
+                return ReplyCheckResult('Monitoring was stopped or the case changed.')
             case_store = CaseStore()
             selection = await case_store.selection(turn.owner_id, turn.conversation_id)
             current = await case_store.get_case(turn.owner_id, job.case_id)
             if current is None:
-                return 'Case is unavailable.'
+                return ReplyCheckResult('Case is unavailable.')
             async with self.model_session() as model:
                 result = await GmailReplyChecks(model, self.mailbox).check(turn, selection, current, reuse_analysis=True)
             await self.store.finish(job, result, self.clock())
             tracing.record_output(span, {'verified': result.verified, 'answer': result.answer})
-            return result.answer
+            return result
 
     async def deliver_pending(self, owner_id: str) -> None:
         for identifier, job, text in await self.store.pending(owner_id):
             try:
+                needs_check, ready = await self.store.reminder_delivery_check(identifier, self.clock())
+                if not ready or (needs_check and not await self.refresh_reminder(job)):
+                    continue
                 if not await self.valid_delivery(job, identifier):
                     continue
                 # Persist BEFORE external handoff. A crash/timeout is ambiguous, never blindly resent.
@@ -79,7 +85,7 @@ class MonitoringWorker:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning('Monitoring notification unconfirmed; no automatic resend after handoff')
+                logger.warning('Monitoring delivery unavailable; attempted handoffs will not be automatically resent')
 
     async def valid_delivery(self, job: MonitorJob, identifier: int) -> bool:
         if not await self.store.valid(job) or not await self.store.notification_valid(identifier):
@@ -87,3 +93,23 @@ class MonitoringWorker:
         with self.mailbox() as mailbox:
             await sync_to_async(mailbox.verify_account)(job.mailbox)
         return await self.store.valid(job) and await self.store.notification_valid(identifier)
+
+
+    async def refresh_reminder(self, job: MonitorJob) -> bool:
+        verified = False
+
+        async def execute(turn: OwnerTurn, epoch: int) -> str:
+            nonlocal verified
+            result = await self.check_result(job, turn)
+            verified = result.verified
+            return result.answer
+
+        try:
+            await ApplicationTurn().prepare(job.turn(), execute)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning('Reminder recheck unavailable; preserving state and backing off')
+            await self.store.finish(job, ReplyCheckResult('Reply status unknown'), self.clock())
+            return False
+        return verified

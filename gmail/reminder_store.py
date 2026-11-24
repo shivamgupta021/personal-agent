@@ -106,9 +106,10 @@ class ReminderStore:
     @staticmethod
     def assess(monitor: CaseMonitor, result: ReplyCheckResult, now: datetime) -> None:
         """Caller holds owner and monitor locks; state and notification commit together."""
-        reminder = CaseReminder.objects.select_for_update().filter(monitor=monitor, status=ReminderStatus.PENDING).first()
+        reminder = CaseReminder.objects.select_for_update().filter(monitor=monitor, status__in=[ReminderStatus.PENDING, ReminderStatus.QUEUED, ReminderStatus.CLARIFY]).first()
         if reminder is None or not result.verified:
             return
+        previous_status = reminder.status
         after = list(result.message_ids)
         if reminder.sent_provenance == 'gmail_verified':
             if reminder.sent_reference not in after:
@@ -122,8 +123,11 @@ class ReminderStore:
         relevant = [finding for finding in result.findings if finding.message_id in after
             and finding.message_id not in reminder.dismissed_message_ids]
         if any(finding.classification == 'substantive' for finding in relevant):
+            MonitorNotification.objects.filter(monitor=monitor, reminder_revision=reminder.revision, attempted=False).update(cancelled=True)
             reminder.status, reminder.reason = ReminderStatus.SATISFIED, 'Substantive reply received; case outcome unchanged.'
             reminder.save()
+            return
+        if previous_status == ReminderStatus.CLARIFY:
             return
         uncertain = [finding.message_id for finding in relevant if finding.classification == 'uncertain']
         if uncertain:
@@ -136,6 +140,8 @@ class ReminderStore:
         if result.truncated:
             ReminderStore.question(reminder, 'The retrieved thread is incomplete. I cannot safely assert that no reply arrived. Please review the thread before following up.', [])
             return
+        if previous_status == ReminderStatus.QUEUED:
+            return
         reminder.status = ReminderStatus.QUEUED
         reminder.save(update_fields=['status'])
         qualification = ('after your sent message' if reminder.sent_provenance == 'gmail_verified'
@@ -146,6 +152,9 @@ class ReminderStore:
 
     @staticmethod
     def question(reminder: CaseReminder, text: str, message_ids: list[str]) -> None:
+        if reminder.status == ReminderStatus.CLARIFY:
+            return
+        MonitorNotification.objects.filter(monitor=reminder.monitor, reminder_revision=reminder.revision, attempted=False).update(cancelled=True)
         reminder.status = ReminderStatus.CLARIFY
         reminder.question_message_ids = message_ids
         reminder.reason = text

@@ -38,9 +38,9 @@ PostgreSQL contains readable application content; there is no application-level 
 
 ## Reminder decisions
 
-An active case-help workflow starts monitoring once relevant correspondence has been selected, and confirms this in the reply. An existing stopped monitor is never silently re-enabled by case help. A new explicit reminder request can enable monitoring.
+An active case-help workflow starts monitoring once relevant correspondence has been selected, and confirms this in the reply. An explicit stop is persisted on the case even before correspondence or a monitor exists; case help never silently re-enables it. A new explicit reminder request can enable monitoring.
 
-A no-response reminder needs an exact future deadline and either Gmail sent-message evidence or an explicitly recorded sent report. Owner-reported sending remains labeled as such. The worker checks before notifying, cancels only the reminder for a substantive reply, asks about uncertain evidence, and preserves state on failures. A draft alone never counts as sent. Stop, disconnect, close and deletion invalidate pending notifications. Reconnection does not restart monitoring automatically.
+A no-response reminder needs an exact future deadline and either Gmail sent-message evidence or an explicitly recorded sent report. Owner-reported sending remains labeled as such. The worker refreshes evidence before queued reminder delivery, including after restart, cancels only the reminder for a substantive reply, asks about uncertain evidence, and preserves state on failures. A draft alone never counts as sent. Stop, disconnect, close and deletion invalidate pending notifications. Reconnection does not restart monitoring automatically.
 
 ## Infrastructure naming
 
