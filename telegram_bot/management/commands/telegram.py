@@ -46,7 +46,7 @@ class Command(BaseCommand):
             base_url=f'https://api.telegram.org/bot{token}/', timeout=HTTP_TIMEOUT_SECONDS,
             follow_redirects=False,
         ) as client:
-            telegram = TelegramClient(client)
+            telegram = TelegramClient(client, trace_base_url=settings.TELEGRAM_TRACE_BASE_URL)
             chat = TelegramService(telegram, state, owner_id, turn_handler=application.prepare,
                 identity=owner_identity)
             stop = asyncio.Event()

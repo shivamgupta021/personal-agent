@@ -47,6 +47,7 @@ class ApplicationTurn:
             async def valid() -> bool:
                 return epoch == await self.ownership.epoch(turn.owner_id)
 
-            reply = PreparedReply(text, valid)
+            context = span.get_span_context()
+            reply = PreparedReply(text, valid, format(context.trace_id, '032x') if context.is_valid else '')
             tracing.record_output(span, {'answer': await reply.render()})
             return reply

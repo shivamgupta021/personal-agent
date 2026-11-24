@@ -81,12 +81,14 @@ def test_application_trace_content_respects_both_capture_settings(capture: bool,
         with override_settings(LANGFUSE_CAPTURE_CONTENT=capture, LANGFUSE_CAPTURE_PRIVATE_CONTENT=private_capture):
             tracing.configure(exporter)
             app = ApplicationService(FunctionModel(respond))
-            answer = asyncio.run(app.run(OwnerTurn('owner', 'owner', 'one', secret)))
-            assert answer == secret
+            reply = asyncio.run(app.prepare(OwnerTurn('owner', 'owner', 'one', secret)))
+            assert asyncio.run(reply.render()) == secret
             tracing.flush()
             spans = exporter.get_finished_spans()
             roots = [span for span in spans if span.parent is None]
             assert len(roots) == 1 and roots[0].name == 'application.turn'
+            assert roots[0].context is not None
+            assert reply.trace_id == format(roots[0].context.trace_id, '032x')
             assert len({span.context.trace_id for span in spans if span.context}) == 1
             assert any(span.attributes and span.attributes.get('application.route') == 'conversation' for span in spans)
             assert (secret in '\n'.join(span.to_json() for span in spans)) == (capture and private_capture)

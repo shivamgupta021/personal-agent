@@ -97,6 +97,14 @@ A standard OpenTelemetry OTLP/HTTP protobuf exporter sends the spans to Langfuse
 
 Prompts remain version-controlled in `research/prompts.py`; Langfuse prompt management is not enabled. Reference: [Pydantic AI–Langfuse integration](https://langfuse.com/integrations/frameworks/pydantic-ai). We use the global configuration supported by the installed Pydantic AI version rather than the older per-agent `instrument=True` constructor example.
 
+For owner-only local testing, optionally set `TELEGRAM_TRACE_BASE_URL` to your
+Langfuse project's traces URL (for example,
+`http://localhost:3000/project/PROJECT_ID/traces`). Restart the bot to append the
+root trace link to each normal application reply. It does not add the URL to model
+history or recorded answer content. Localhost links must be opened on the Mac;
+they do not expose Langfuse to your phone. Forgetting can delete earlier traces,
+so review them before running deletion tests.
+
 ## Checks
 
 ```sh
