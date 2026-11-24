@@ -11,3 +11,8 @@ class ReminderStatus(models.TextChoices):
     CLARIFY = 'clarify', 'Reply needs owner clarification'
     CANCELLED = 'cancelled', 'Cancelled'
     SATISFIED = 'satisfied', 'Substantive reply received'
+
+
+class ReminderKind(models.TextChoices):
+    NO_RESPONSE = 'no_response', 'No new response'
+    DRAFT_REVIEW = 'draft_review', 'Review an unsent draft'

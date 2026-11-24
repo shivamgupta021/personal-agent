@@ -47,6 +47,7 @@ class ReplySnapshot:
     fingerprint: str
     sent_matches: tuple[dict[str, str | int], ...] = ()
     findings: tuple[ReplyFinding, ...] = ()
+    analysis_fingerprint: str = ''
 
 
 @dataclass(frozen=True)
@@ -72,7 +73,7 @@ class GmailReplyChecks:
         return (await self.check(turn, selection, current, usage)).answer
 
     async def check(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                    usage: RunUsage | None = None, *, reuse_analysis: bool = False) -> ReplyCheckResult:
+                    usage: RunUsage | None = None, *, reuse_analysis: bool = True) -> ReplyCheckResult:
         if not await EmailConsent.objects.filter(owner_id=turn.owner_id).aexists():
             return ReplyCheckResult('Please enable email processing before I inspect your correspondence.')
         try:
@@ -92,12 +93,11 @@ class GmailReplyChecks:
             incoming = [message for message in messages if 'DRAFT' not in message.labels
                 and self.addresses(message.sender) != [snapshot.mailbox.casefold()]]
             findings: list[ReplyFinding] = []
-            if reuse_analysis and incoming and {item.message_id for item in incoming} == {item.message_id for item in snapshot.findings}:
+            if reuse_analysis and incoming and self.analysis_key(incoming, result.truncated) == snapshot.analysis_fingerprint:
                 findings = list(snapshot.findings)
                 self.validate_findings(incoming, findings)
             elif incoming:
-                analyzed = await self.agent.run(json.dumps({'request': turn.text,
-                    'received_messages': [asdict(message) for message in incoming], 'truncated': result.truncated}),
+                analyzed = await self.agent.run(json.dumps({'received_messages': [asdict(message) for message in incoming], 'truncated': result.truncated}),
                     usage=usage, usage_limits=UsageLimits(request_limit=constants.ASSISTANCE_REQUEST_LIMIT),
                     timeout=constants.ASSISTANCE_TIMEOUT_SECONDS)
                 findings = analyzed.output.findings
@@ -116,6 +116,12 @@ class GmailReplyChecks:
                 tuple(message.message_id for message in messages if 'DRAFT' not in message.labels), result.truncated, any(message.unread_attachments for message in messages))
         except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
             return ReplyCheckResult('I could not verify the reply status just now. The previous record is unchanged; please try again.')
+
+    @staticmethod
+    def analysis_key(messages: list[ImportedMessage], truncated: bool) -> str:
+        payload = {'messages': [asdict(message) for message in messages], 'truncated': truncated,
+                   'instructions': REPLY_CHECK_INSTRUCTIONS}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     @staticmethod
     def addresses(value: str) -> list[str]:
@@ -143,7 +149,7 @@ class GmailReplyChecks:
                 seen = tuple(item['message_id'] for item in row.messages)
                 matches = ()
                 findings = ()
-            return ReplySnapshot(row.mailbox, row.selected_thread, seen, self.fingerprint(row), matches, findings)
+            return ReplySnapshot(row.mailbox, row.selected_thread, seen, self.fingerprint(row), matches, findings, checked.analysis_fingerprint if checked else '')
 
     @staticmethod
     def validate_findings(messages: list[ImportedMessage], findings: list[ReplyFinding]) -> None:
@@ -224,6 +230,8 @@ class GmailReplyChecks:
             correspondence = [message for message in result.items if 'DRAFT' not in message.labels]
             state.seen_message_ids = list(dict.fromkeys([*snapshot.seen,
                 *(message.message_id for message in correspondence)]))[-MAX_SEEN_MESSAGES:]
+            incoming = [message for message in correspondence if self.addresses(message.sender) != [snapshot.mailbox.casefold()]]
+            state.analysis_fingerprint = self.analysis_key(incoming, result.truncated)
             state.findings = [finding.model_dump() for finding in findings]
             state.sent_matches, state.last_summary = matches, answer
             state.save()

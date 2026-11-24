@@ -110,6 +110,8 @@ def test_failed_check_preserves_previous_state(failure: str) -> None:
     old = GmailReplyCheckState.objects.get().last_summary
     harness.mailbox.failure = failure == 'provider'
     harness.bad_quote = failure == 'quote'
+    if failure == 'quote':
+        harness.mailbox.result.items.append(ImportedMessage('third', 'thread1', 'support@example.com', 'Refund', '', 'New evidence', False))
     if failure == 'account':
         harness.mailbox.result = MailResult('someone@example.com', [harness.new])
     if failure == 'empty':
@@ -229,3 +231,21 @@ def test_account_change_during_classification_does_not_persist_a_check() -> None
     assert 'could not verify' in harness.check()
     assert not GmailReplyCheckState.objects.exists()
     assert [message['message_id'] for message in CaseMailbox.objects.get().messages] == ['old']
+
+@pytest.mark.django_db(transaction=True)
+def test_unchanged_explicit_checks_reuse_analysis_but_changed_content_is_reanalyzed() -> None:
+    harness = ReplyHarness()
+    calls = 0
+    def counted(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        return harness.respond(messages, info)
+    harness.service = GmailReplyChecks(FunctionModel(counted), lambda: nullcontext(harness.mailbox))
+    harness.check()
+    harness.check()
+    assert calls == 1
+    assert harness.mailbox.reads == 2  # Fresh provider verification remains mandatory.
+    harness.mailbox.result.items[1] = ImportedMessage('new', 'thread1', 'support@example.com',
+        'Refund', '', 'Refund rejected.', False)
+    assert 'Refund rejected' in harness.check()
+    assert calls == 2

@@ -223,3 +223,26 @@ def test_selected_context_clarifies_conflicting_company_before_any_write() -> No
         assert selected_seen and 'clarify' in reply.lower()
         assert await service.store.get_case('owner', case.id) == before
     asyncio.run(run())
+
+@pytest.mark.django_db(transaction=True)
+def test_independent_public_question_preserves_selected_case_without_exporting_it() -> None:
+    proposal: dict[str, object] = {'action': 'create', 'label': 'Kettle', 'intent_quote': 'Create a case',
+        'facts': [{'key': 'order_reference', 'value': 'PRIVATE-ORDER', 'quote': 'PRIVATE-ORDER'}]}
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, proposal)])
+    public: list[str] = []
+    async def research(message: str) -> str:
+        public.append(message)
+        return 'Official Python documentation'
+    async def run() -> None:
+        app = ApplicationService(FunctionModel(respond), research)
+        await app.run(OwnerTurn('owner', 'chat', 'create', 'Create a case called Kettle. PRIVATE-ORDER'))
+        selected = await app.store.selection('owner', 'chat')
+        proposal.clear()
+        proposal['action'] = 'public'
+        assert await app.run(OwnerTurn('owner', 'chat', 'public', 'Find official Python documentation')) == 'Official Python documentation'
+        assert public == ['Find official Python documentation']
+        assert await app.store.selection('owner', 'chat') == selected
+        await app.run(OwnerTurn('owner', 'chat', 'private', 'Search for PRIVATE-ORDER'))
+        assert len(public) == 1
+    asyncio.run(run())

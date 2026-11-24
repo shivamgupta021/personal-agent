@@ -38,12 +38,9 @@ class DraftRevisions:
                 draft__case__owner_id=turn.owner_id, status='created').select_related('draft')
             if version is not None:
                 rows = rows.filter(draft__version=version)
-            choices = list(rows.order_by('-draft__version')[:2])
+            choices = list(rows.order_by('-draft__version')[:1])
             if not choices:
                 raise GmailError('I could not find that saved Gmail draft version. Which draft would you like revised?')
-            if len(choices) > 1:
-                raise GmailError(f'The latest Gmail draft is v{choices[0].draft.version}; earlier drafts will stay unchanged. '
-                    'Which version should I revise?')
             row = choices[0]
             if row.mailbox.casefold() != mailbox.casefold() or row.thread_id != thread_id:
                 raise GmailError('That draft belongs to a different mailbox or email conversation. Select its case correspondence before revising it.')

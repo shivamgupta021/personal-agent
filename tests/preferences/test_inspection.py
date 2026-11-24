@@ -12,7 +12,7 @@ from conversations.models import ConversationRecord
 from grievances.models import GrievanceCase, CaseSelection, CaseFactRevision
 
 from core.turns import OwnerTurn
-from grievances.service import SubscriptionApplicationService
+from grievances.service import SubscriptionApplicationService, ApplicationService
 from preferences.models import SavedPreference
 from subscriptions.service import SubscriptionService
 
@@ -98,3 +98,24 @@ def test_router_cannot_copy_case_identifiers_into_preference_history(tmp_path: P
     answer = asyncio.run(app.run(OwnerTurn('owner', 'owner', 'private', 'Show my saved preferences for order PRIVATE-123')))
     assert 'Case material cannot become general memory' in answer
     assert not any('PRIVATE-123' in str(r.history) for r in ConversationRecord.objects.all())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_explicit_preference_save_routes_directly_to_authorization() -> None:
+    calls = 0
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            result = {'action': 'preference'}
+        else:
+            assert calls == 2, 'No intermediary memory model for an explicit preference operation'
+            assert 'consent_quote' in str(info.output_tools[0].parameters_json_schema)
+            result = {'action': 'save', 'key': 'reply_style', 'value': 'concise replies',
+                      'consent_quote': 'Remember that I prefer concise replies.', 'value_quote': 'concise replies'}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, result)])
+    answer = asyncio.run(ApplicationService(FunctionModel(respond)).run(
+        OwnerTurn('owner', 'owner', 'save', 'Remember that I prefer concise replies.')))
+    assert answer == 'Saved preference: reply style: concise replies.'
+    assert SavedPreference.objects.get(identity='owner').value == 'concise replies'
+    assert calls == 2

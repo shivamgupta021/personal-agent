@@ -38,13 +38,20 @@ class Mailbox:
     def search(self, query: str) -> MailResult[Candidate]:
         with self.connection.connected() as connection:
             token = str(connection.credentials.token)
-            listed = self._get('/messages', token, {'q': query, 'maxResults': constants.MAX_CANDIDATES})
+            listed = self._get('/messages', token, {'q': '(' + query + ') -in:drafts', 'maxResults': constants.MAX_CANDIDATES})
             items: list[Candidate] = []
             seen: set[str] = set()
             for candidate in listed.get('messages', [])[:constants.MAX_CANDIDATES]:
+                listed_thread = candidate.get('threadId')
+                if listed_thread and self._identifier(listed_thread) in seen:
+                    continue
                 message_id = self._identifier(candidate.get('id'))
                 message = self._get('/messages/' + message_id, token, {'format': 'metadata'})
                 thread = self._identifier(message.get('threadId'))
+                if listed_thread and thread != listed_thread:
+                    raise GmailError('Gmail search returned inconsistent thread metadata. Please retry.')
+                if 'DRAFT' in message.get('labelIds', []):
+                    continue
                 if thread in seen:
                     continue
                 seen.add(thread)

@@ -26,6 +26,7 @@ from grievances.deletion import CaseDeletionService
 from grievances.cleanup import CaseTraceCleanup
 from core.tracing import tracing
 from preferences.inspection import PreferenceInspection
+from preferences.runner import PreferenceRunner
 from grievances import constants
 from grievances.drafts import DraftService
 from grievances.policy import PolicyResearchService, PublicResearchBoundary
@@ -40,6 +41,7 @@ from subscriptions.service import SubscriptionService
 from conversations.constants import DELETE_CONVERSATION_PHRASES
 from conversations.service import ConversationService
 from conversations.memory import ConversationMemoryRunner
+from conversations.direct import DirectConversation
 
 
 class ApplicationService:
@@ -107,11 +109,12 @@ class ApplicationService:
                 selection, current = reminder_selection, target
             if current is None:
                 return 'Which case is this reminder for?'
+            action = await ReminderStore.resolve_kind(turn.owner_id, current.id, action)
             now = timezone.now()
             error = ReminderStore.deadline_error(action, turn.text, now)
             if error:
                 return error
-            if action.action == 'gmail_reminder_set':
+            if action.action == 'gmail_reminder_set' and action.reminder_kind == 'no_response':
                 if self.correspondence.mailbox is None:
                     return 'Gmail is unavailable; I could not verify correspondence for this reminder.'
                 checked = await GmailReplyChecks(self.model, self.correspondence.mailbox).check(
@@ -206,13 +209,21 @@ class ApplicationService:
             if action.facts:
                 return 'Case facts cannot become general memory. Please ask separately about saved preferences.'
             return await PreferenceInspection().run(turn)
+        if action.action == 'preference':
+            if action.facts:
+                return 'Case facts cannot become general memory. Please clarify the preference to manage.'
+            return await ConversationService(turn.owner_id, PreferenceRunner(self.model, usage)).run(turn.text)
         if action.action in ('conversation', 'memory'):
             if action.facts:
                 return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'
+            if action.action == 'conversation' and action.conversation_reply and intake.conversation is not None:
+                if not await self.store.general_allowed(replace(turn, text=action.conversation_reply), epoch):
+                    return 'Case material cannot become general conversation history. Please ask about the case directly.'
+                return await DirectConversation().save(turn, action.conversation_reply, intake.conversation)
             return await self.memory(turn)
         if action.action == 'public':
-            if current or action.facts:
-                return 'Please explicitly return to general research and send a public question separately, or select a case.'
+            if action.facts:
+                return 'Please send an independent public question without case facts.'
             with tracing.public_content():
                 return await self.public_run(turn.text) if self.public_run else 'Public research is unavailable in this session.'
         return await self.store.apply(turn, action, selection, current)
