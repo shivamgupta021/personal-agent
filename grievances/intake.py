@@ -4,13 +4,16 @@ from dataclasses import asdict, dataclass, replace
 import json
 import re
 
+from django.utils import timezone
+from zoneinfo import ZoneInfo
+from gmail.reminder_constants import REMINDER_TIMEZONE
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.tracing import tracing
 from core.turns import OwnerTurn
-from gmail.models import CaseMailbox, EmailConsent
+from gmail.models import CaseMailbox, EmailConsent, CaseReminder
 from grievances import constants
 from grievances.correspondence import CompanyReplyParser, ParsedCompanyReply
 from grievances.policy_store import PolicyStore
@@ -130,9 +133,13 @@ class CaseIntake:
         cases = await self.store.list_cases(turn.owner_id)
         preferences = await PreferenceStore().list(turn.owner_id)
         pending = await CaseMailbox.objects.filter(case_id=current.id).afirst() if current else None
+        reminder = await CaseReminder.objects.filter(monitor__mailbox_record__case_id=current.id).afirst() if current else None
         directory: dict[str, object] = {
+            'reminder': {'status': reminder.status, 'deadline': reminder.due_at.isoformat(), 'question': reminder.reason} if reminder else None,
             'gmail_enabled': await EmailConsent.objects.filter(owner_id=turn.owner_id).aexists(),
             'mail_pending': {'goal': pending.pending_goal, 'question': pending.pending_question, 'choices': pending.candidates} if pending and pending.pending_question else None,
+            'current_time': timezone.now().astimezone(ZoneInfo(REMINDER_TIMEZONE)).isoformat(),
+            'timezone': REMINDER_TIMEZONE,
             'current_request': turn.text, 'research_status': research_status, 'draft_versions': draft_versions,
             'selected_case': {'id': current.id} if current else None,
             'case_labels': [asdict(case) for case in cases],
@@ -151,6 +158,9 @@ class CaseIntake:
             if (not action.intent_quote or action.intent_quote not in request
                     or not re.search(r'\b(monitor|monitoring|watch|notify|keep an eye|let me know)\b', action.intent_quote, re.IGNORECASE)):
                 return 'Please explicitly request starting or stopping monitoring. Nothing changed.'
+        if action.action in ('gmail_reminder_set', 'gmail_reminder_cancel', 'gmail_reminder_clarify') and (
+                not action.intent_quote or action.intent_quote not in request):
+            return 'Please state the reminder change in your own words. Nothing changed.'
         if action.action == 'delete':
             return 'Please explicitly say “Delete this case” or “Delete case LABEL”. Nothing changed.'
         if action.action in ('create', 'select', 'leave') and (not action.intent_quote or action.intent_quote not in request):
@@ -161,6 +171,6 @@ class CaseIntake:
         if action.correction_quote and (action.correction_quote not in request or not re.search(
                 r'\b(correct(?:ion)?|replace|change|update|amend)\b', action.correction_quote, re.IGNORECASE)):
             return 'Please explicitly state the correction. Nothing changed.'
-        if (action.action in SELECTED_ACTIONS or action.action.startswith('gmail_')) and action.case_id and action.case_id != selection.case_id:
+        if (action.action in SELECTED_ACTIONS or action.action.startswith('gmail_')) and not action.action.startswith('gmail_reminder_') and action.case_id and action.case_id != selection.case_id:
             return 'Please explicitly select the intended case first. Nothing changed.'
         return None

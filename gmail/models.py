@@ -66,6 +66,21 @@ class MonitorNotification(models.Model):
     monitor: models.ForeignKey[CaseMonitor, CaseMonitor] = models.ForeignKey(CaseMonitor, on_delete=models.CASCADE)
     generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
     text: models.TextField[str, str] = models.TextField()
+    reminder_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    cancelled: models.BooleanField[bool, bool] = models.BooleanField(default=False)
     attempted: models.BooleanField[bool, bool] = models.BooleanField(default=False)
     delivered: models.BooleanField[bool, bool] = models.BooleanField(default=False)
     created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+
+class CaseReminder(models.Model):
+    monitor: models.OneToOneField[CaseMonitor, CaseMonitor] = models.OneToOneField(CaseMonitor, on_delete=models.CASCADE)
+    due_at: models.DateTimeField[datetime, datetime] = models.DateTimeField()
+    revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    status: models.CharField[str, str] = models.CharField(max_length=16, default='pending')
+    sent_provenance: models.CharField[str, str] = models.CharField(max_length=32)
+    sent_reference: models.CharField[str, str] = models.CharField(max_length=128)
+    baseline_message_ids = models.JSONField(default=list)
+    dismissed_message_ids = models.JSONField(default=list)
+    question_message_ids = models.JSONField(default=list)
+    reason: models.TextField[str, str] = models.TextField(default='')

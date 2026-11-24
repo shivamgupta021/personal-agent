@@ -68,12 +68,12 @@ class MonitoringWorker:
     async def deliver_pending(self, owner_id: str) -> None:
         for identifier, job, text in await self.store.pending(owner_id):
             try:
-                if not await self.valid_delivery(job):
+                if not await self.valid_delivery(job, identifier):
                     continue
                 # Persist BEFORE external handoff. A crash/timeout is ambiguous, never blindly resent.
                 if not await self.store.handoff(identifier, job):
                     continue
-                reply = PreparedReply(text, lambda: self.valid_delivery(job))
+                reply = PreparedReply(text, lambda: self.valid_delivery(job, identifier))
                 await self.send(reply)
                 await self.store.delivered(identifier)
             except asyncio.CancelledError:
@@ -81,9 +81,9 @@ class MonitoringWorker:
             except Exception:
                 logger.warning('Monitoring notification unconfirmed; no automatic resend after handoff')
 
-    async def valid_delivery(self, job: MonitorJob) -> bool:
-        if not await self.store.valid(job):
+    async def valid_delivery(self, job: MonitorJob, identifier: int) -> bool:
+        if not await self.store.valid(job) or not await self.store.notification_valid(identifier):
             return False
         with self.mailbox() as mailbox:
             await sync_to_async(mailbox.verify_account)(job.mailbox)
-        return await self.store.valid(job)
+        return await self.store.valid(job) and await self.store.notification_valid(identifier)

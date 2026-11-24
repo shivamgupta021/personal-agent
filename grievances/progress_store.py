@@ -6,7 +6,8 @@ import re
 from asgiref.sync import sync_to_async
 
 from core.turns import OwnerTurn
-from gmail.models import CaseMonitor
+from gmail.models import CaseMonitor, CaseReminder
+from gmail.reminder_constants import ReminderStatus
 from django.db.models import F
 from grievances.mutations import CaseMutation
 from grievances.correspondence import ParsedCompanyReply
@@ -155,6 +156,9 @@ class ProgressStore:
             CaseOutcome.objects.create(case=case, operation=receipt, outcome=outcome, owner_quote=intent_quote)
             case.status = outcome
             case.save(update_fields=['status'])
+            CaseReminder.objects.filter(monitor__mailbox_record__case=case,
+                status__in=[ReminderStatus.PENDING, ReminderStatus.QUEUED, ReminderStatus.CLARIFY]).update(
+                    status=ReminderStatus.CANCELLED, revision=F('revision') + 1, reason='case closed')
             CaseMonitor.objects.filter(mailbox_record__case=case, active=True).update(
                 active=False, generation=F('generation') + 1, stopped_reason='case closed')
             self._advance(case)
