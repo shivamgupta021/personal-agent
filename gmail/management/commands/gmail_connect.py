@@ -9,12 +9,12 @@ from gmail.service import GmailService
 
 
 class Command(GmailCommand):
-    help = 'Authorize one Gmail account with read-only access using desktop browser consent.'
+    help = 'Authorize Gmail reading and draft creation together using desktop browser consent.'
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument('--email', required=True, help='Expected Gmail account address.')
         parser.add_argument('--replace-account', action='store_true')
-        parser.add_argument('--compose', action='store_true', help='Request reading plus draft-creation permission through fresh Google consent.')
+        parser.add_argument('--compose', action='store_true', default=True, help='Reading and draft creation are requested together by default.')
 
     def execute_operation(self, service: GmailService, options: dict[str, Any]) -> str:
         if not settings.GMAIL_CLIENT_FILE:

@@ -78,7 +78,7 @@ def test_connection_runs_after_releasing_model_session(tmp_path: Path, monkeypat
     service = SubscriptionApplicationService(SubscriptionService(tmp_path), public, connect)
     reply = asyncio.run(service.run(OwnerTurn('owner', 'owner', 'connect', 'Connect Gmail for owner@example.com')))
     assert 'Gmail connected' in reply
-    assert connections == [('owner@example.com', False)]
+    assert connections == [('owner@example.com', True)]
 
 
 @pytest.mark.django_db(transaction=True)

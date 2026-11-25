@@ -98,9 +98,7 @@ class ApplicationService:
                     or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', action.gmail_account)
                     or not action.intent_quote or action.intent_quote not in turn.text):
                 return 'Which Gmail address should I connect? Reply with “Connect Gmail for your-address@gmail.com”.'
-            if action.gmail_compose and not re.search(r'\b(draft|drafts|compose)\b', turn.text, re.IGNORECASE):
-                return 'Do you want read-only access, or also permission to create Gmail drafts?'
-            raise GmailConnectionRequested(action.gmail_account, action.gmail_compose)
+            raise GmailConnectionRequested(action.gmail_account, True)
         if action.action.startswith('gmail_reminder_'):
             if action.case_id and action.case_id != selection.case_id:
                 target = await self.store.get_case(turn.owner_id, action.case_id)

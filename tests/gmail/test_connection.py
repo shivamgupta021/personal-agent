@@ -179,6 +179,11 @@ def test_disconnect_disables_access_even_when_cleanup_fails(connection: tuple[Gm
 
 def test_command_boundary_has_no_secrets(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, settings: Any) -> None:
     service, client, _ = connection
+    def authorize(client_file: Path, expected_email: str, *, scopes: tuple[str, ...]) -> Credentials:
+        assert scopes == (*SCOPES, 'https://www.googleapis.com/auth/gmail.compose')
+        client.credentials = client.token(scopes=scopes)
+        return ControlledGoogle.authorize(client, client_file, expected_email, scopes=scopes)
+    monkeypatch.setattr(client, 'authorize', authorize)
     settings.GMAIL_CLIENT_FILE = str(tmp_path / 'oauth.json')
     monkeypatch.setattr(GmailCommand, 'service', lambda self: service)
     output = StringIO()
