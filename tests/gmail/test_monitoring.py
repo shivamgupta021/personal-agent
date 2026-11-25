@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import json
 
 import pytest
@@ -21,6 +22,9 @@ from gmail.monitoring_store import MonitoringStore
 from gmail.records import ImportedMessage, MailResult
 from grievances.models import CaseSelection, GrievanceCase
 from grievances.service import ApplicationService
+from gmail.service import GmailService
+from tests.telegram_bot.test_gmail import MemoryCredentials, ProfileGoogle
+from subscriptions.auth import SubscriptionBusy
 
 
 class ControlledSubscription:
@@ -106,6 +110,46 @@ class MonitoringHarness:
 
     def tick(self) -> None:
         asyncio.run(self.worker.tick('bot:123'))
+
+
+@pytest.mark.django_db(transaction=True)
+def test_consent_lock_defers_monitoring_without_failure_alert(tmp_path: Path) -> None:
+    h = MonitoringHarness()
+    h.control()
+    CaseMonitor.objects.update(next_check=h.now)
+    connection = GmailService(MemoryCredentials(), ProfileGoogle(), tmp_path)
+    h.mailbox.during_read = connection.require_connection
+    with connection.operation():
+        h.tick()
+    assert not h.delivered
+    assert not MonitorNotification.objects.exists()
+    assert CaseMonitor.objects.get().failures == 0
+    h.now = CaseMonitor.objects.get().next_check
+    h.tick()
+    assert CaseMonitor.objects.get().failures == 0
+    assert h.classifications == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_busy_subscription_defers_without_alert() -> None:
+    h = MonitoringHarness()
+    h.control()
+    CaseMonitor.objects.update(next_check=h.now)
+
+    @asynccontextmanager
+    async def busy() -> AsyncIterator[Model]:
+        raise SubscriptionBusy('Foreground turn holds the lease')
+        yield h.model
+
+    h.worker.model_session = busy
+    h.tick()
+    assert CaseMonitor.objects.get().failures == 0
+    assert not MonitorNotification.objects.exists()
+    h.worker.model_session = h.subscription.model
+    h.now = CaseMonitor.objects.get().next_check
+    h.tick()
+    assert CaseMonitor.objects.get().failures == 0
+    assert h.classifications == 1
 
 
 @pytest.mark.django_db(transaction=True)

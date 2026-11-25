@@ -14,6 +14,30 @@ from grievances.service import ApplicationService
 
 
 @pytest.mark.django_db(transaction=True)
+def test_create_retries_model_invented_label_before_asking_owner() -> None:
+    calls = 0
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+            'action': 'create',
+            'label': 'Attachment QA Store (fictional)' if calls == 1 else 'Attachment QA Store',
+            'intent_quote': 'Create a fictional refund case for Attachment QA Store',
+        })])
+
+    async def scenario() -> None:
+        service = ApplicationService(FunctionModel(respond))
+        answer = await service.run(OwnerTurn('owner', 'chat', 'create',
+            'Create a fictional refund case for Attachment QA Store, separate from my real purchases.'))
+        assert 'saved and selected' in answer
+        assert [case.label for case in await service.store.list_cases('owner')] == ['Attachment QA Store']
+
+    asyncio.run(scenario())
+    assert calls == 2
+
+
+@pytest.mark.django_db(transaction=True)
 def test_create_missing_facts_restart_and_replay() -> None:
     calls = 0
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
