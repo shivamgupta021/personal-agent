@@ -51,16 +51,18 @@ class ConversationService:
                 trace_id = format(span.get_span_context().trace_id, '032x')
                 if span.is_recording():
                     await self.store.track(self.identity, trace_id, context)
-                result = await self.runner.run_turn(message, context, self.forget_conversation, ArchiveRecall(self.identity, self.store),
-                    FactCleanup(self.identity, self.store, message, context))
+                try:
+                    result = await self.runner.run_turn(message, context, self.forget_conversation, ArchiveRecall(self.identity, self.store),
+                        FactCleanup(self.identity, self.store, message, context))
+                except PreferenceReply as reply:
+                    tracing.record_output(span, {'answer': str(reply)})
+                    return str(reply)
                 context.capture(result.all_messages())
                 await self.store.save(self.identity, result.all_messages(), context)
                 tracing.record_output(span, {'answer': result.output})
                 return result.output
         except ConversationEditRejected as rejected:
             return 'Nothing changed: ' + str(rejected)
-        except PreferenceReply as reply:
-            return str(reply)
         except ConversationEdited as edited:
             cleaned = True
             confirmation = 'Fact updated locally. ' if edited.action == 'correct' else 'Selected information forgotten locally. '
