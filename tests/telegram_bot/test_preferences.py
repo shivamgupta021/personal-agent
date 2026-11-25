@@ -280,3 +280,30 @@ def test_fact_forgetting_sanitizes_preference_source_without_deleting_preference
     assert 'PHONE-765' not in json.dumps(record.archive) + json.dumps(record.history)
     assert 'PHONE-765' not in str(SavedPreference.objects.values().get())
     assert 'metric' in json.dumps(record.archive[saved.source_message_id])
+
+
+@pytest.mark.django_db(transaction=True)
+def test_successful_preference_confirmation_has_no_error_span() -> None:
+    exporter = InMemorySpanExporter()
+    tracing.configure(exporter)
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if 'PREFERENCE_AUTHORIZATION' in str(info):
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+                'action': 'save', 'key': 'units', 'value': 'metric',
+                'value_quote': 'metric', 'consent_quote': 'Remember metric units.'})])
+        return ModelResponse(parts=[ToolCallPart('manage_preferences', {})])
+
+    async def run() -> None:
+        async with httpx2.AsyncClient() as web:
+            service = ConversationService('trace-preference', ResearchAgent(FunctionModel(model), Firecrawl(web)))
+            assert 'Saved preference' in await service.run('Remember metric units.')
+
+    try:
+        asyncio.run(run())
+        tracing.flush()
+        spans = [span for span in exporter.get_finished_spans() if span.name == 'conversation.turn']
+        assert len(spans) == 1
+        assert spans[0].status.status_code.name != 'ERROR'
+    finally:
+        tracing.shutdown()

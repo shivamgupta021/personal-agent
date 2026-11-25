@@ -311,3 +311,45 @@ def test_two_worker_claims_do_not_poll_same_case_during_lease() -> None:
     first = asyncio.run(MonitoringStore().claim('bot:123', h.now))
     second = asyncio.run(MonitoringStore().claim('bot:123', h.now))
     assert first is not None and second is None
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('changed_word', [False, True])
+def test_monitor_accepts_whitespace_only_quote_changes(changed_word: bool) -> None:
+    h = MonitoringHarness()
+    h.control()
+    h.mailbox.messages = [ImportedMessage('old', 'thread1', 'support@example.com', 'Refund', '',
+        'We received your request.\r\n\r\n\r\nReview is pending.', False)]
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        quote = 'We received your request.\n\nReview is ' + ('approved.' if changed_word else 'pending.')
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'findings': [{
+            'message_id': 'old', 'classification': 'acknowledgement',
+            'summary': 'Request received; review pending.', 'quote': quote}]})])
+
+    h.subscription.controlled_model = FunctionModel(respond)
+    CaseMonitor.objects.update(next_check=h.now)
+    h.tick()
+    assert CaseMonitor.objects.get().failures == int(changed_word)
+    assert bool(h.delivered) is changed_word
+
+
+@pytest.mark.django_db(transaction=True)
+def test_monitor_retries_quote_assigned_to_wrong_message() -> None:
+    h = MonitoringHarness()
+    h.control()
+    calls = 0
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'findings': [{
+            'message_id': 'old', 'classification': 'acknowledgement', 'summary': 'Request received.',
+            'quote': 'Refund approved.' if calls == 1 else 'Received.'}]})])
+
+    h.subscription.controlled_model = FunctionModel(respond)
+    CaseMonitor.objects.update(next_check=h.now)
+    h.tick()
+    assert CaseMonitor.objects.get().failures == 0
+    assert not h.delivered
+    assert calls == 2

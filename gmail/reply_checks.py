@@ -10,7 +10,7 @@ from typing import Literal
 from asgiref.sync import sync_to_async
 import httpx2
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -65,10 +65,20 @@ class ReplyCheckResult:
 class GmailReplyChecks:
     def __init__(self, model: Model, mailbox: Callable[[], AbstractContextManager[Mailbox]]) -> None:
         self.mailbox = mailbox
-        self.agent = Agent(model, output_type=ReplyAnalysis, name='gmail_reply_check',
+        self.agent: Agent[list[ImportedMessage], ReplyAnalysis] = Agent(model, deps_type=list[ImportedMessage], output_type=ReplyAnalysis, name='gmail_reply_check',
             instructions=REPLY_CHECK_INSTRUCTIONS, retries=constants.PLANNER_RETRIES,
             model_settings={'max_tokens': constants.DRAFT_MAX_OUTPUT_TOKENS})
         self.agent.instrument = tracing.private_instrumentation()
+        self.agent.output_validator(self.validate_analysis)
+
+    @staticmethod
+    def validate_analysis(ctx: RunContext[list[ImportedMessage]], analysis: ReplyAnalysis) -> ReplyAnalysis:
+        try:
+            GmailReplyChecks.validate_findings(ctx.deps, analysis.findings)
+        except GmailError:
+            if ctx.retry < constants.PLANNER_RETRIES:
+                raise ModelRetry('Each received message needs one finding. Copy its quote only from that exact message_id, not another email or its quoted history. For truncated evidence, use a visible excerpt or subject and mark uncertainty.') from None
+        return analysis
 
     async def run(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
                   usage: RunUsage | None = None) -> str:
@@ -104,6 +114,7 @@ class GmailReplyChecks:
                 self.validate_findings(incoming, findings)
             elif incoming:
                 analyzed = await self.agent.run(json.dumps({'received_messages': [message.evidence() for message in incoming], 'truncated': result.truncated}),
+                    deps=incoming,
                     usage=usage, usage_limits=UsageLimits(request_limit=constants.ASSISTANCE_REQUEST_LIMIT),
                     timeout=constants.ASSISTANCE_TIMEOUT_SECONDS)
                 findings = analyzed.output.findings
@@ -164,7 +175,8 @@ class GmailReplyChecks:
         sources = {message.message_id: message.subject + '\n' + message.text for message in messages}
         if len(findings) != len(sources) or {finding.message_id for finding in findings} != set(sources):
             raise GmailError('Incomplete reply classification')
-        if any(finding.quote not in sources[finding.message_id] for finding in findings):
+        if any(not finding.quote.strip() or ' '.join(finding.quote.split()) not in
+               ' '.join(sources[finding.message_id].split()) for finding in findings):
             raise GmailError('Unsupported reply evidence')
 
     @sync_to_async
