@@ -97,7 +97,7 @@ class ApplicationService:
             if (not action.gmail_account or action.gmail_account not in turn.text
                     or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', action.gmail_account)
                     or not action.intent_quote or action.intent_quote not in turn.text):
-                return 'Which Gmail address should I connect? Reply with “Connect Gmail for your-address@gmail.com”.'
+                return 'Which Gmail address should I connect?'
             raise GmailConnectionRequested(action.gmail_account, True)
         if action.action.startswith('gmail_reminder_'):
             if action.case_id and action.case_id != selection.case_id:

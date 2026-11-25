@@ -71,7 +71,7 @@ class GmailService:
             if previous and previous.email.casefold() != actual_email.casefold() and self.disable_monitoring:
                 self.disable_monitoring()
             self.store.save(Connection(actual_email, credentials))
-            return f'Connected Gmail: {actual_email}. ' + ('Reading and draft creation enabled; nothing sent.' if compose else 'Read-only access; no messages were fetched.')
+            return f'Connected Gmail: {actual_email}. ' + ('Reading and draft creation enabled.' if compose else 'Read-only access enabled.')
 
     @contextmanager
     def connected(self) -> Iterator[Connection]:
