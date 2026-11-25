@@ -18,7 +18,7 @@ from core.tracing import tracing
 from core.workers import drain_on_cancel
 from core.turns import OwnerTurn
 from gmail import constants
-from gmail.errors import GmailError
+from gmail.errors import GmailError, GmailBusy
 from gmail.mailbox import Mailbox
 from gmail.models import CaseMailbox, EmailConsent, GmailDraftExport, GmailReplyCheckState
 from gmail.records import ImportedMessage, MailResult
@@ -81,7 +81,11 @@ class GmailReplyChecks:
         try:
             snapshot = await self.snapshot(turn, selection, current)
             with self.mailbox() as mailbox, tracing.operation('gmail.check_replies', {'thread_id': snapshot.thread_id}, private=True) as span:
-                result = await drain_on_cancel(sync_to_async(mailbox.thread)(snapshot.thread_id, snapshot.mailbox, list(snapshot.messages)))
+                try:
+                    result = await drain_on_cancel(sync_to_async(mailbox.thread)(snapshot.thread_id, snapshot.mailbox, list(snapshot.messages)))
+                except GmailBusy:
+                    tracing.record_output(span, {'status': 'deferred', 'reason': 'Gmail connection busy'})
+                    raise
                 tracing.record_output(span, asdict(result))
                 span.set_attribute('gmail.messages', len(result.items))
                 span.set_attribute('gmail.truncated', result.truncated)
@@ -116,6 +120,8 @@ class GmailReplyChecks:
             await self.save(turn, selection, current, snapshot, result, findings, sent_matches, answer)
             return ReplyCheckResult(answer, True, tuple(findings),
                 tuple(message.message_id for message in messages if 'DRAFT' not in message.labels), result.truncated, any(message.unread_attachments for message in messages))
+        except GmailBusy:
+            raise
         except (GmailError, httpx2.HTTPError, ValueError, KeyError, TypeError):
             return ReplyCheckResult('I could not verify the reply status just now. The previous record is unchanged; please try again.')
 

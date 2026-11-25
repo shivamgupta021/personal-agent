@@ -7,7 +7,7 @@ import re
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 from gmail.reminder_constants import REMINDER_TIMEZONE
-from pydantic_ai import Agent
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -88,11 +88,19 @@ class CaseIntake:
 
     def __init__(self, model: Model, store: CaseStore) -> None:
         self.store = store
-        self.agent: Agent[None, IntakeAction] = Agent(
-            model, output_type=IntakeAction, instructions=INTAKE_INSTRUCTIONS,
+        self.agent: Agent[str, IntakeAction] = Agent(
+            model, deps_type=str, output_type=IntakeAction, instructions=INTAKE_INSTRUCTIONS,
             name='case_intake', retries=constants.VALIDATION_RETRIES,
             model_settings={'max_tokens': constants.MAX_OUTPUT_TOKENS})
         self.agent.instrument = tracing.private_instrumentation()
+        self.agent.output_validator(self.validate_label)
+
+    @staticmethod
+    def validate_label(ctx: RunContext[str], action: IntakeAction) -> IntakeAction:
+        if (action.action == 'create' and action.label
+                and action.label not in ctx.deps and ctx.retry < constants.VALIDATION_RETRIES):
+            raise ModelRetry('Copy the case label exactly from current_request. Do not append descriptions or invent a label. If no label is supplied, ask for clarification.')
+        return action
 
     async def interpret(self, turn: OwnerTurn, epoch: int) -> AuthorizedIntake | str:
         if len(turn.text) > constants.MAX_INPUT_CHARS:
@@ -104,7 +112,7 @@ class CaseIntake:
             return 'This case directory exceeds the intake context limit. Nothing changed.'
         usage = RunUsage()
         with tracing.operation('case.intake', context.directory, kind='agent', private=True) as span:
-            result = await self.agent.run(encoded, usage=usage,
+            result = await self.agent.run(encoded, deps=turn.text, usage=usage,
                 usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                 timeout=constants.RUN_TIMEOUT_SECONDS)
             span.set_attribute('application.route', result.output.action)
@@ -116,7 +124,7 @@ class CaseIntake:
             if len(selected_encoded) > constants.MAX_CONTEXT_CHARS:
                 return 'This case exceeds the intake context limit. Nothing changed.'
             with tracing.operation('case.selected_intake', selected_payload, kind='agent', private=True) as span:
-                action = (await self.agent.run(selected_encoded, instructions=SELECTED_INTAKE_INSTRUCTIONS,
+                action = (await self.agent.run(selected_encoded, deps=turn.text, instructions=SELECTED_INTAKE_INSTRUCTIONS,
                     usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                     timeout=constants.RUN_TIMEOUT_SECONDS)).output
                 span.set_attribute('application.route', action.action)

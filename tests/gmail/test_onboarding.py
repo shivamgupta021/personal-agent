@@ -19,6 +19,9 @@ from gmail.onboarding import GmailOnboarding, ConnectionAttempt
 from gmail.service import GmailService
 from grievances.service import SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
+from tests.telegram_bot.test_gmail import DraftHarness
+from gmail.constants import SCOPES
+from gmail.models import CaseMailbox
 
 
 @pytest.mark.parametrize('failure', [False, True])
@@ -138,3 +141,58 @@ def test_missing_connection_saves_goal_without_planning_and_resumes_after_consen
         assert 'Hosteller' in reply
 
     asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_readonly_draft_request_is_saved_for_consent_resume(tmp_path: Path) -> None:
+    harness = DraftHarness(tmp_path)
+
+    async def scenario() -> None:
+        await harness.send('I agree to email processing')
+        await harness.send('Help me get my Kettle refund')
+        assert harness.credentials.connection is not None
+        harness.credentials.connection.credentials._scopes = list(SCOPES)
+        request = 'Draft the reply in Gmail'
+        answer = await harness.send(request)
+        assert 'reading only' in answer
+        assert (await CaseMailbox.objects.aget()).pending_goal == request
+        assert not harness.created
+        original_model = harness.model
+
+        def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            properties = info.output_tools[0].parameters_json_schema.get('properties', {}) if info.output_tools else {}
+            if 'action' in properties and harness.text.startswith('Enable'):
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+                    'action': 'gmail_connect', 'gmail_account': 'owner@example.com',
+                    'gmail_compose': True, 'intent_quote': harness.text})])
+            return original_model(messages, info)
+
+        @asynccontextmanager
+        async def model(self: SubscriptionService, name: str = '') -> AsyncIterator[Model]:
+            yield FunctionModel(respond)
+
+        async def connect(turn: OwnerTurn, email: str, compose: bool) -> ConnectionAttempt:
+            assert compose and email == 'owner@example.com'
+            assert harness.credentials.connection is not None
+            harness.credentials.connection.credentials._scopes = [*SCOPES, 'https://www.googleapis.com/auth/gmail.compose']
+            harness.text = request
+            return ConnectionAttempt(True, 'Gmail connected.')
+
+        async def public(message: str) -> str:
+            raise AssertionError('Private draft cannot reach research')
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(SubscriptionService, 'model', model)
+            patch.setattr(GmailFactory, 'mailbox', harness.correspondence.mailbox)
+            patch.setattr(GmailFactory, 'require_connection', harness.connection.require_connection)
+            app = SubscriptionApplicationService(SubscriptionService(tmp_path), public, connect)
+            harness.text = 'Enable Gmail draft creation for owner@example.com'
+            answer = await app.run(OwnerTurn('test:7', 'test:7', 'upgrade', harness.text))
+        assert 'Draft v1' in answer
+        assert len(harness.created) == 1
+        assert (await CaseMailbox.objects.aget()).pending_goal == ''
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        harness.http.close()

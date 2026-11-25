@@ -12,6 +12,8 @@ from django.utils import timezone
 from core.tracing import tracing
 from core.turns import OwnerTurn, PreparedReply
 from gmail.mailbox import Mailbox
+from gmail.errors import GmailBusy
+from subscriptions.auth import SubscriptionBusy
 from gmail.monitoring_constants import MAX_CASES_PER_TICK
 from gmail.monitoring_store import MonitorJob, MonitoringStore
 from gmail.reply_checks import GmailReplyChecks, ReplyCheckResult
@@ -64,8 +66,14 @@ class MonitoringWorker:
             current = await case_store.get_case(turn.owner_id, job.case_id)
             if current is None:
                 return ReplyCheckResult('Case is unavailable.')
-            async with self.model_session() as model:
-                result = await GmailReplyChecks(model, self.mailbox).check(turn, selection, current, reuse_analysis=True)
+            try:
+                async with self.model_session() as model:
+                    result = await GmailReplyChecks(model, self.mailbox).check(turn, selection, current, reuse_analysis=True)
+            except (GmailBusy, SubscriptionBusy):
+                await self.store.defer(job, self.clock())
+                tracing.record_output(span, {'status': 'deferred', 'reason': 'foreground resource busy'})
+                logger.info('Monitoring deferred while a foreground resource is busy')
+                return ReplyCheckResult('Monitoring deferred while a foreground operation is running.')
             await self.store.finish(job, result, self.clock())
             tracing.record_output(span, {'verified': result.verified, 'answer': result.answer})
             return result

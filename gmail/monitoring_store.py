@@ -9,7 +9,7 @@ from django.db.models import F
 
 from core.turns import OwnerTurn
 from gmail.models import CaseMailbox, CaseMonitor, EmailConsent, MonitorNotification, CaseReminder
-from gmail.monitoring_constants import MAX_FAILURE_DELAY_SECONDS, MAX_NOTIFICATION_CHARS, POLL_SECONDS, MAX_BACKOFF_EXPONENT, MAX_DELIVERIES_PER_TICK
+from gmail.monitoring_constants import MAX_FAILURE_DELAY_SECONDS, MAX_NOTIFICATION_CHARS, POLL_SECONDS, MAX_BACKOFF_EXPONENT, MAX_DELIVERIES_PER_TICK, SCHEDULER_TICK_SECONDS
 from gmail.monitoring_lifecycle import MonitoringLifecycle
 from gmail.reply_checks import ReplyCheckResult
 from gmail.reminder_store import ReminderStore
@@ -149,6 +149,14 @@ class MonitoringStore:
     def valid(self, job: MonitorJob) -> bool:
         with transaction.atomic():
             return self.locked_job(job) is not None
+
+    @sync_to_async
+    def defer(self, job: MonitorJob, now: datetime) -> None:
+        with transaction.atomic():
+            monitor = self.locked_job(job)
+            if monitor is not None:
+                monitor.next_check = now + timedelta(seconds=SCHEDULER_TICK_SECONDS)
+                monitor.save(update_fields=['next_check'])
 
     @sync_to_async
     def finish(self, job: MonitorJob, result: ReplyCheckResult, now: datetime) -> None:

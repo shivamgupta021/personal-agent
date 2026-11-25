@@ -46,6 +46,10 @@ class CredentialStore:
         _write_private(self.path, json.dumps(asdict(credentials)))
 
 
+class SubscriptionBusy(RuntimeError):
+    """The subscription lease is owned by another foreground or background turn."""
+
+
 class SubscriptionSession:
     """Own sign-in, credential access and exclusive use of one local session."""
 
@@ -63,7 +67,7 @@ class SubscriptionSession:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise RuntimeError("Another command is using this subscription session.") from None
+                raise SubscriptionBusy("Another command is using this subscription session.") from None
             yield
         finally:
             os.close(descriptor)

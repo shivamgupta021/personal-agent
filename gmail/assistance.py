@@ -15,7 +15,7 @@ from gmail import constants
 from gmail.correspondence import Correspondence
 from gmail.drafts import GmailDraftService
 from gmail.records import CorrespondenceSnapshot
-from gmail.errors import GmailDisconnected, GmailError
+from gmail.errors import GmailDisconnected, GmailError, GmailComposeRequired
 from gmail.prompts import MAIL_BRIEF_INSTRUCTIONS, MAIL_MATCH_INSTRUCTIONS
 from grievances.schema import IntakeAction
 from grievances.store import CaseStore, CaseView, SelectionView
@@ -96,8 +96,13 @@ class CaseAssistance:
                     revision: bool = False, version: int | None = None) -> str:
         if self.correspondence.mailbox is None:
             return 'Gmail is unavailable. Please check the connection.'
-        answer = await GmailDraftService(self.model, self.correspondence.mailbox).run(
-            turn, selection, current, row, usage, recipient, revision=revision, version=version)
+        try:
+            answer = await GmailDraftService(self.model, self.correspondence.mailbox).run(
+                turn, selection, current, row, usage, recipient, revision=revision, version=version)
+        except GmailComposeRequired as error:
+            await self.correspondence.remember_goal(turn, selection, current, str(error), recipient)
+            return (str(error) + f' Say “Enable Gmail draft creation for {row.mailbox}”. '
+                'After consent, I’ll continue this draft request automatically.')
         if answer.rstrip().endswith('?'):
             await self.correspondence.remember_goal(turn, selection, current, answer, recipient)
         return answer

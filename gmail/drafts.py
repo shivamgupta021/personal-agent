@@ -17,7 +17,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from core.tracing import tracing
 from core.turns import OwnerTurn
 from gmail import constants
-from gmail.errors import GmailError, DraftOutcomeUnknown
+from gmail.errors import GmailError, DraftOutcomeUnknown, GmailComposeRequired
 from gmail.mailbox import Mailbox
 from gmail.models import CaseMailbox, GmailDraftExport
 from gmail.records import CorrespondenceSnapshot, DraftEnvelope
@@ -167,6 +167,8 @@ class GmailDraftService:
             await self.finish(export_id, 'created', reference.draft_id, reference.message_id)
             await self.clear_pending(turn, selection, current)
             return await self.result(export_id)
+        except GmailComposeRequired:
+            raise
         except DraftOutcomeUnknown as error:
             if export_id is not None:
                 await self.finish(export_id, 'uncertain')

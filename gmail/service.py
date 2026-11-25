@@ -11,7 +11,7 @@ from google.oauth2.credentials import Credentials
 from gmail.client import GoogleClient
 from gmail.constants import SCOPES, COMPOSE_SCOPES, COMPOSE_SCOPE, TOKEN_URL
 from gmail.credentials import Connection, CredentialStore
-from gmail.errors import GmailError, GmailDisconnected
+from gmail.errors import GmailError, GmailDisconnected, GmailBusy, GmailComposeRequired
 
 
 class GmailService:
@@ -30,7 +30,7 @@ class GmailService:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise GmailError('Another Gmail operation is running. Try again when it finishes.') from None
+                raise GmailBusy('Another Gmail operation is running. Try again when it finishes.') from None
             yield
         except GmailError:
             raise
@@ -46,7 +46,7 @@ class GmailService:
         if set(scopes or ()) not in (set(SCOPES), set(COMPOSE_SCOPES)):
             raise GmailError('Gmail grant is incomplete or broader than supported. Reconnect with the requested permissions.')
         if require_compose and COMPOSE_SCOPE not in (scopes or ()):
-            raise GmailError('Gmail is connected for reading only. Enable draft creation through Google consent; your current reading connection is preserved.')
+            raise GmailComposeRequired('Gmail is connected for reading only. Enable draft creation through Google consent; your current reading connection is preserved.')
         if not credentials.refresh_token or credentials.token_uri != TOKEN_URL:
             raise GmailError('Gmail offline credentials are missing or invalid. Reconnect Gmail.')
 
