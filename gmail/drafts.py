@@ -189,9 +189,9 @@ class GmailDraftService:
     def describe(row: GmailDraftExport) -> str:
         if row.status == 'created':
             link = f'https://mail.google.com/mail/?authuser={quote(row.mailbox, safe="")}#inbox?compose={row.message_id}' if row.message_id else ''
-            return (f'Draft v{row.draft.version} is ready in Gmail for {row.recipient}. Nothing was sent.\n'
-                + (f'Open draft in Gmail (web):\n{link}\n' if link else '')
-                + f'{"If the link does not open it, open" if link else "Open"} Gmail Drafts in {row.mailbox} and look for “{row.draft.subject}”.')
+            return (f'Draft v{row.draft.version} is ready for your review in Gmail.\nTo: {row.recipient}\n\n'
+                + (f'[Open in Gmail]({link})' if link else
+                   f'Find “{row.draft.subject}” in Gmail Drafts for {row.mailbox}.'))
         if row.status == 'failed':
             return 'Gmail did not create this draft. Check the connection or permission before requesting it again.'
         return 'Draft creation is unconfirmed. Check Gmail Drafts before retrying; I will not create another copy automatically.'

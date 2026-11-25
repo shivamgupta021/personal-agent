@@ -34,10 +34,9 @@ class GmailOnboarding:
     async def connect(self, turn: OwnerTurn, email: str, compose: bool) -> ConnectionAttempt:
         if not self.client_file.is_file():
             return ConnectionAttempt(False, 'Google connection setup is unavailable on this Mac. The operator needs to configure the Google OAuth client file first.')
-        capability = 'read email and create unsent drafts' if compose else 'read email'
-        await self.progress(f'I’m opening Google consent on this Mac to {capability} for {email}. '
-            'Choose that account and approve access in the browser. I’ll continue here when it finishes. '
-            'This local consent flow cannot finish in a phone browser.')
+        capability = 'read relevant emails and prepare drafts' if compose else 'read relevant emails'
+        await self.progress(f'Approve Gmail access in the browser on this Mac so I can {capability}. '
+            f'Choose {email}; I’ll continue here once you’re connected.')
         with tracing.operation('gmail.connect', {'compose': compose}, private=True) as span:
             try:
                 result = await asyncio.to_thread(self.service().connect,

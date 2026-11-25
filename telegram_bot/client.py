@@ -11,6 +11,7 @@ from attachments.constants import MAX_FILE_BYTES
 from attachments.records import Upload
 
 from telegram_bot.constants import MESSAGE_INTERVAL_SECONDS, MESSAGE_MAX_UTF16_UNITS, POLL_RETRY_SECONDS, POLL_TIMEOUT_SECONDS
+from telegram_bot.presentation import ReplyPresentation
 
 
 class TelegramError(RuntimeError):
@@ -78,6 +79,8 @@ class TelegramClient:
     async def _send(self, chat_id: int, text: str | PreparedReply) -> None:
         prepared = text if isinstance(text, PreparedReply) else None
         remaining = await prepared.render() if prepared else str(text)
+        presentation = ReplyPresentation.from_text(remaining)
+        remaining = presentation.text
         if (prepared and self.trace_base_url and re.fullmatch(r'[0-9a-f]{32}', prepared.trace_id)
                 and await prepared.valid()):
             remaining += f'\n\nTrace: {self.trace_base_url}/{prepared.trace_id}'
@@ -89,7 +92,11 @@ class TelegramClient:
                     chunk = chunk[:boundary + 1]
             if prepared and not await prepared.valid():
                 return
-            await self.request('sendMessage', {'chat_id': chat_id, 'text': chunk})
+            payload: dict[str, Any] = {'chat_id': chat_id, 'text': chunk}
+            if len(chunk) == len(remaining) and presentation.buttons:
+                payload['reply_markup'] = {'inline_keyboard': [
+                    [{'text': label, 'url': url}] for label, url in presentation.buttons]}
+            await self.request('sendMessage', payload)
             remaining = remaining[len(chunk):]
             if remaining:
                 await asyncio.sleep(MESSAGE_INTERVAL_SECONDS)

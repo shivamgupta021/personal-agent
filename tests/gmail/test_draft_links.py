@@ -43,10 +43,15 @@ def test_link_and_fallback_then_open_refreshes_without_creating(tmp_path: Path, 
         await harness.send('Help me get my Kettle refund')
         answer = await harness.send('Draft the reply in Gmail')
         assert 'Draft v1' in answer
-        assert ('#inbox?compose=abc123' in answer) == bool(message_id == 'abc123')
-        assert 'Gmail Drafts in owner@example.com' in answer
+        payload = harness.reply_payloads[-1]
+        if message_id == 'abc123':
+            assert payload['reply_markup']['inline_keyboard'][0][0]['url'].endswith('#inbox?compose=abc123')
+            assert 'https://mail.google.com' not in answer
+        else:
+            assert 'reply_markup' not in payload
+            assert 'Gmail Drafts for owner@example.com' in answer
         answer = await harness.send('Open my latest Gmail draft')
-        assert '#inbox?compose=def456' in answer
+        assert harness.reply_payloads[-1]['reply_markup']['inline_keyboard'][0][0]['url'].endswith('#inbox?compose=def456')
         assert len(harness.created) == 1
         row = await GmailDraftExport.objects.aget()
         assert row.message_id == 'def456'

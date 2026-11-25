@@ -145,6 +145,7 @@ class MailHarness:
         self.text = ''
         self.count = 0
         self.answers: list[str] = []
+        self.reply_payloads: list[dict[str, Any]] = []
         self.required_filters: list[str] = []
         self.plan_queries = ['"Kettle"']
         self.planner_calls = 0
@@ -219,7 +220,9 @@ class MailHarness:
             if request.url.path.endswith('getUpdates'):
                 return httpx2.Response(200, json={'ok': True, 'result': [{'update_id': self.count, 'message': {
                     'from': {'id': 7}, 'chat': {'id': 7, 'type': 'private'}, 'text': text}}]})
-            self.answers.append(json.loads(request.content)['text'])
+            payload = json.loads(request.content)
+            self.reply_payloads.append(payload)
+            self.answers.append(payload['text'])
             return httpx2.Response(200, json={'ok': True, 'result': {}})
         async def public(message: str) -> str:
             raise AssertionError('Private Gmail must not reach public research')
@@ -566,8 +569,11 @@ def test_draft_request_creates_only_unsent_gmail_draft_and_handles_uncertainty(t
             await harness.send('Draft the reply in Gmail')
             assert len(harness.created) == 1
         else:
-            assert 'Draft v1' in answer and 'Nothing was sent' in answer
-            assert 'https://mail.google.com/mail/?authuser=owner%40example.com#inbox?compose=abc123' in answer
+            assert 'Draft v1' in answer and 'ready for your review' in answer
+            assert 'https://mail.google.com' not in answer
+            assert harness.reply_payloads[-1]['reply_markup'] == {'inline_keyboard': [[{
+                'text': 'Open in Gmail',
+                'url': 'https://mail.google.com/mail/?authuser=owner%40example.com#inbox?compose=abc123'}]]}
             await harness.send('Draft a firmer reply in Gmail')
             assert len(harness.created) == 2  # New version, never overwrite the previous Gmail draft.
     try:
