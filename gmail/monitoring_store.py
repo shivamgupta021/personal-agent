@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import F
 
 from core.turns import OwnerTurn
+from core.tracing import tracing
 from gmail.models import CaseMailbox, CaseMonitor, EmailConsent, MonitorNotification, CaseReminder
 from gmail.monitoring_constants import MAX_FAILURE_DELAY_SECONDS, MAX_NOTIFICATION_CHARS, POLL_SECONDS, MAX_BACKOFF_EXPONENT, MAX_DELIVERIES_PER_TICK, SCHEDULER_TICK_SECONDS
 from gmail.monitoring_lifecycle import MonitoringLifecycle
@@ -194,7 +195,7 @@ class MonitoringStore:
                 # Persist every character before advancing the transaction's seen state.
                 # Splitting a notification must not silently discard later findings.
                 for offset in range(0, len(text), MAX_NOTIFICATION_CHARS):
-                    MonitorNotification.objects.create(monitor=monitor, generation=job.generation,
+                    MonitorNotification.objects.create(monitor=monitor, generation=job.generation, origin_trace_id=tracing.current_trace_id(),
                         text=text[offset:offset + MAX_NOTIFICATION_CHARS])
 
     @sync_to_async
@@ -210,7 +211,7 @@ class MonitoringStore:
                     continue
                 reminder.status = ReminderStatus.QUEUED
                 reminder.save(update_fields=['status'])
-                MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation,
+                MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation, origin_trace_id=tracing.current_trace_id(),
                     reminder_revision=reminder.revision,
                     text=f'Reminder: review draft v{reminder.draft_version} for {monitor.mailbox_record.case.label} in Gmail. Nothing was sent. You can ask me to open or revise it.')
 

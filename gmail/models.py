@@ -65,6 +65,7 @@ class CaseMonitor(models.Model):
 
 
 class MonitorNotification(models.Model):
+    origin_trace_id: models.CharField[str, str] = models.CharField(max_length=32, default='')
     monitor: models.ForeignKey[CaseMonitor, CaseMonitor] = models.ForeignKey(CaseMonitor, on_delete=models.CASCADE)
     generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
     text: models.TextField[str, str] = models.TextField()

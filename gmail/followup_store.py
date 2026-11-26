@@ -6,6 +6,7 @@ from asgiref.sync import sync_to_async
 from django.db import transaction
 
 from core.actions import CaseAction
+from core.tracing import tracing
 from core.turns import OwnerTurn
 from gmail.followup_constants import FollowupStatus, LEASE_SECONDS, SendStatus
 from gmail.models import CaseFollowup, CaseMonitor, CaseReminder, FollowupSend, MonitorNotification, FollowupApproval
@@ -54,7 +55,7 @@ class FollowupStore:
 
     @staticmethod
     def notify(policy: CaseFollowup, text: str) -> None:
-        MonitorNotification.objects.create(monitor=policy.monitor, generation=policy.monitor.generation,
+        MonitorNotification.objects.create(monitor=policy.monitor, generation=policy.monitor.generation, origin_trace_id=tracing.current_trace_id(),
             text=f'{policy.case.label}: {text}')
 
     @sync_to_async

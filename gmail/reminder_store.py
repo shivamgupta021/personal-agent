@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from asgiref.sync import sync_to_async
 
 from core.turns import OwnerTurn
+from core.tracing import tracing
 from gmail.models import CaseMonitor, CaseReminder, MonitorNotification, GmailDraftExport
 from gmail.reminder_constants import REMINDER_TIMEZONE, ReminderStatus, ReminderKind
 from gmail.reply_checks import ReplyCheckResult
@@ -169,7 +170,7 @@ class ReminderStore:
         reminder.save(update_fields=['status'])
         qualification = ('since this reminder was set, following your sent message' if reminder.sent_provenance == 'gmail_verified'
             else 'since this reminder was set; sending remains owner-reported')
-        MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation,
+        MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation, origin_trace_id=tracing.current_trace_id(),
             reminder_revision=reminder.revision,
             text=f'Reminder for {monitor.mailbox_record.case.label}: I checked the selected thread and found no substantive reply {qualification}. You can review the case or ask me for a follow-up draft. Nothing was sent.')
 
@@ -182,7 +183,7 @@ class ReminderStore:
         reminder.question_message_ids = message_ids
         reminder.reason = text
         reminder.save()
-        MonitorNotification.objects.create(monitor=reminder.monitor, generation=reminder.monitor.generation,
+        MonitorNotification.objects.create(monitor=reminder.monitor, generation=reminder.monitor.generation, origin_trace_id=tracing.current_trace_id(),
             reminder_revision=reminder.revision, text=text)
 
     @staticmethod
