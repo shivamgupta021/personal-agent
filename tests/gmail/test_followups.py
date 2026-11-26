@@ -164,6 +164,28 @@ def test_approval_followups_limit_and_restart() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('failure', [TimeoutError, RuntimeError])
+def test_followup_model_failure_pauses_and_notifies_without_sending(failure: type[Exception]) -> None:
+    h = FollowupHarness()
+    h.approve()
+    h.tick()
+
+    def unavailable(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise failure('Controlled provider failure')
+
+    h.model = FunctionModel(unavailable)
+    h.now += timedelta(minutes=1)
+    h.tick()
+    assert len(h.mailbox.sent) == 1
+    assert CaseFollowup.objects.get(case=h.case).status == FollowupStatus.PAUSED
+    assert any('could not safely complete' in text for text in h.notifications)
+    h.now += timedelta(minutes=10)
+    h.worker = h.new_worker()
+    h.tick()
+    assert len(h.mailbox.sent) == 1
+
+
+@pytest.mark.django_db(transaction=True)
 def test_offer_pauses_without_accepting_or_closing_case() -> None:
     h = FollowupHarness()
     h.approve()
