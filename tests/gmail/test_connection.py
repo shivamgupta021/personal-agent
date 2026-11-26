@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from io import StringIO
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from django.core.management import call_command
@@ -82,6 +83,13 @@ class ControlledGoogle(GoogleClient):
         return True
 
 
+@pytest.fixture(autouse=True)
+def controlled_keychain_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These tests substitute MemoryKeychain, including on the Linux CI runner.
+    # Patch only the credential module's platform view, not Python's global sys.
+    monkeypatch.setattr('gmail.credentials.sys', SimpleNamespace(platform='darwin'))
+
+
 @pytest.fixture
 def connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[GmailService, ControlledGoogle, MemoryKeychain]:
     store = KeychainStore(tmp_path, 'test-owner')
@@ -89,6 +97,15 @@ def connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[GmailSe
     monkeypatch.setattr(store, 'backend', backend)
     client = ControlledGoogle()
     return GmailService(store, client, tmp_path), client, backend
+
+
+def test_unsupported_platform_does_not_save_credentials(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain],
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service, client, backend = connection
+    monkeypatch.setattr('gmail.credentials.sys', SimpleNamespace(platform='linux'))
+    with pytest.raises(GmailError, match='macOS Keychain'):
+        service.connect(tmp_path / 'client.json', client.email)
+    assert not backend.entries
 
 
 def test_connect_restart_refresh_and_disconnect(connection: tuple[GmailService, ControlledGoogle, MemoryKeychain], tmp_path: Path) -> None:
