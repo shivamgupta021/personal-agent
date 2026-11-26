@@ -9,7 +9,7 @@ from core.errors import user_error_message
 from core.service import ApplicationService
 from core.tracing import tracing
 from core.turns import OwnerTurn, PreparedReply
-from gmail.correspondence import Correspondence, CONSENT_MESSAGE
+from gmail.correspondence import Correspondence
 from gmail.factory import GmailFactory
 from gmail.onboarding import GmailConnectionRequested, ConnectionAttempt
 from gmail.planner import GmailQueryPlanner
@@ -70,6 +70,10 @@ class SubscriptionApplicationService:
         original_selection = await CaseStore().selection(turn.owner_id, turn.conversation_id)
         connected = await self.connect_gmail(turn, request.email, request.compose)
         if not connected.connected:
+            action = CaseAction.verify(turn.callback, turn.owner_id, epoch) if turn.callback else None
+            if action and action.kind == 'g' and action.case_id == original_selection.case_id:
+                return ('Gmail connection didn’t finish. Tap below to try again; I’ll continue your case once connected.\n\n'
+                        + action.button('Connect Gmail', turn.owner_id, epoch))
             return connected.message
         if epoch != await CaseOwnership().epoch(turn.owner_id):
             return connected.message + ' The case changed; please send a new request.'
@@ -82,8 +86,10 @@ class SubscriptionApplicationService:
         if pending and await Correspondence.consented(turn.owner_id):
             resumed = await self._execute(replace(turn.followup(), text=pending, callback=''), epoch)
             return resumed
-        if pending:
-            return connected.message + '\n\n' + CONSENT_MESSAGE
+        if pending and selection.case_id:
+            return ('Gmail is connected. To continue, allow the assistant to read the relevant emails '
+                    'and process them with the AI provider.\n\n'
+                    + CaseAction('g', selection.case_id).button('Continue with Gmail', turn.owner_id, epoch))
         return connected.message + ' Tell me which email or case you need help with.'
 
     async def _connect_in_background(self, turn: OwnerTurn, request: GmailConnectionRequested, epoch: int) -> None:

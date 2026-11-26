@@ -85,9 +85,12 @@ def test_connection_runs_after_releasing_model_session(tmp_path: Path, monkeypat
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize('connection_unavailable', [False, True])
+@pytest.mark.parametrize('first_attempt_expires', [False, True])
 def test_missing_connection_saves_goal_without_planning_and_resumes_after_consent(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, connection_unavailable: bool) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, connection_unavailable: bool,
+        first_attempt_expires: bool) -> None:
     connected = False
+    attempts = 0
     routed: list[str] = []
     original = 'Help me with my Hosteller refund'
 
@@ -115,7 +118,10 @@ def test_missing_connection_saves_goal_without_planning_and_resumes_after_consen
             raise GmailDisconnected('Missing local grant')
 
     async def connect(turn: OwnerTurn, email: str, compose: bool) -> ConnectionAttempt:
-        nonlocal connected
+        nonlocal connected, attempts
+        attempts += 1
+        if first_attempt_expires and attempts == 1:
+            return ConnectionAttempt(False, 'Gmail connection expired.')
         connected = True
         return ConnectionAttempt(True, 'Gmail connected.')
 
@@ -138,6 +144,12 @@ def test_missing_connection_saves_goal_without_planning_and_resumes_after_consen
         token = re.search(r'action://([^)]*)', first)
         assert token is not None
         reply = await service.run(OwnerTurn('owner', 'owner', 'connect', 'Connect Gmail', callback=token[1]))
+        if first_attempt_expires:
+            assert not connected
+            assert routed == [original]
+            retry = re.search(r'action://([^)]*)', reply)
+            assert retry is not None
+            reply = await service.run(OwnerTurn('owner', 'owner', 'retry', 'Connect Gmail', callback=retry[1]))
         assert 'I agree to' not in reply
         assert original in routed[1:]  # Successful connection resumes without a magic phrase.
         assert 'Hosteller' in reply

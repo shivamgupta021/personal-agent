@@ -1,4 +1,4 @@
-"""Local Django settings. No web endpoints or persistent case models yet."""
+"""Local Django settings for Telegram, agent services, and persistent application state."""
 
 import os
 from pathlib import Path
