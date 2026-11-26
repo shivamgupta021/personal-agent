@@ -23,7 +23,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from core.turns import OwnerTurn, PreparedReply
 from gmail.correspondence import Correspondence
 from gmail.followup_constants import FollowupStatus
-from gmail.models import CaseMonitor, FollowupApproval, CaseFollowup, CaseMailbox, EmailConsent, FollowupSend, GmailDraftExport
+from gmail.models import CaseMonitor, CaseReminder, FollowupApproval, CaseFollowup, CaseMailbox, EmailConsent, FollowupSend, GmailDraftExport
 from gmail.monitoring import MonitoringWorker
 from gmail.monitoring_store import MonitoringStore
 from gmail.records import DraftEnvelope, ImportedMessage, MailResult
@@ -119,6 +119,20 @@ class FollowupHarness:
         assert 'Approve & send' in self.say('Prepare automatic sending')
         assert 'approved' in self.say('Approve this sending plan')
         CaseFollowup.objects.filter(case=self.case).update(next_due=self.now)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_sending_invalidates_review_reminder_for_that_draft() -> None:
+    h = FollowupHarness()
+    h.approve()
+    reminder = CaseReminder.objects.create(monitor=CaseMonitor.objects.get(), kind='draft_review',
+        draft_version=1, due_at=h.now + timedelta(minutes=2), sent_provenance='', sent_reference='')
+    h.tick()
+    reminder.refresh_from_db()
+    assert reminder.status == 'cancelled'
+    h.now += timedelta(minutes=3)
+    h.tick()
+    assert not any('Reminder: review draft' in text for text in h.notifications)
 
 
 @pytest.mark.django_db(transaction=True)
