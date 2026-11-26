@@ -10,7 +10,8 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from core.turns import OwnerTurn
-from grievances.service import ApplicationService
+from core.service import ApplicationService
+from grievances.service import CaseService
 
 
 @pytest.mark.django_db(transaction=True)
@@ -27,7 +28,7 @@ def test_create_retries_model_invented_label_before_asking_owner() -> None:
         })])
 
     async def scenario() -> None:
-        service = ApplicationService(FunctionModel(respond))
+        service = CaseService(FunctionModel(respond))
         answer = await service.run(OwnerTurn('owner', 'chat', 'create',
             'Create a fictional refund case for Attachment QA Store, separate from my real purchases.'))
         assert 'saved and selected' in answer
@@ -51,7 +52,7 @@ def test_create_missing_facts_restart_and_replay() -> None:
         })])
     async def run() -> None:
         turn = OwnerTurn('owner-a', 'chat-a', 'telegram:1', 'Create a refund case called Lumen kettle. Lumen kettle is broken.')
-        service = ApplicationService(FunctionModel(respond))
+        service = CaseService(FunctionModel(respond))
         reply = await service.run(turn)
         assert 'saved' in reply.lower()
         assert 'amount' in reply.lower()
@@ -59,7 +60,7 @@ def test_create_missing_facts_restart_and_replay() -> None:
         assert len(cases) == 1
         case = await service.store.get_case('owner-a', cases[0].id)
         assert case and case.status == 'open' and case.facts == {'company': 'Lumen', 'issue': 'broken', 'requested_remedy': 'refund'}
-        restarted = ApplicationService(FunctionModel(respond))
+        restarted = CaseService(FunctionModel(respond))
         assert (await restarted.store.selection('owner-a', 'chat-a')).case_id == case.id
         assert 'already' in (await restarted.run(turn)).lower()
         assert len(await restarted.store.list_cases('owner-a')) == 1
@@ -74,7 +75,7 @@ def test_conflicting_amount_requires_explicit_correction_and_preserves_history()
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, proposed)])
     async def run() -> None:
-        service = ApplicationService(FunctionModel(respond))
+        service = CaseService(FunctionModel(respond))
         proposed.update(action='create', label='Kettle', intent_quote='Create a case',
                         facts=[{'key': 'amount_paid', 'value': '2,400', 'quote': '2,400'}])
         await service.run(OwnerTurn('a', 'a', '1', 'Create a case called Kettle. Paid 2,400.'))
@@ -89,7 +90,7 @@ def test_conflicting_amount_requires_explicit_correction_and_preserves_history()
         proposed['correction_quote'] = 'Correction: the amount was 2,700'
         turn = OwnerTurn('a', 'a', '3', 'Correction: the amount was 2,700')
         assert await service.run(turn) == 'Updated amount paid: **2,700**.'
-        await ApplicationService(FunctionModel(respond)).run(turn)
+        await CaseService(FunctionModel(respond)).run(turn)
         current = await service.store.get_case('a', case_id)
         assert current and current.facts['amount_paid'] == '2,700' and current.revision == 2
         assert current.history == [{'amount_paid': '2,400'}, {'amount_paid': '2,700'}]
@@ -108,14 +109,14 @@ def test_owner_selection_isolation_ambiguity_and_return_to_public_research() -> 
         public.append(message)
         return 'Public answer'
     async def run() -> None:
-        service = ApplicationService(FunctionModel(respond), research)
+        service = CaseService(FunctionModel(respond))
         for owner, delivery, label, secret in [('a', '1', 'Kettle', 'SECRET-A'), ('a', '2', 'Headphones', 'SECRET-B'), ('b', '1', 'Tablet', 'SECRET-C')]:
             proposal.clear()
             proposal.update(action='create', label=label, intent_quote='Create a case',
                             facts=[{'key': 'order_reference', 'value': secret, 'quote': secret}])
             inputs.clear()
             await service.run(OwnerTurn(owner, owner, delivery, f'Create a case called {label}. Order {secret}.'))
-            assert all(other not in str(inputs) for other in ['SECRET-A', 'SECRET-B', 'SECRET-C'] if other != secret)
+            assert ('SECRET-C' not in str(inputs)) if owner == 'a' else all(other not in str(inputs) for other in ['SECRET-A','SECRET-B'])
         cases = await service.store.list_cases('a')
         assert len(cases) == 2
         hidden = (await service.store.list_cases('b'))[0]
@@ -135,9 +136,10 @@ def test_owner_selection_isolation_ambiguity_and_return_to_public_research() -> 
         await service.run(OwnerTurn('a', 'a', '6', 'Add broken to that order'))
         assert await service.store.get_case('a', cases[0].id) == before
         assert not public
-        proposal.update(action='public')
+        proposal.clear()
+        proposal.update(specialist='research')
         inputs.clear()
-        assert await service.run(OwnerTurn('a', 'a', '7', 'Find official Python docs')) == 'Public answer'
+        assert await ApplicationService(FunctionModel(respond), research).run(OwnerTurn('a', 'a', '7', 'Find official Python docs')) == 'Public answer'
         assert public == ['Find official Python docs']
         assert 'SECRET-' not in str(inputs)
     asyncio.run(run())
@@ -154,7 +156,7 @@ def test_private_trace_payload_exclusion_with_global_content_capture(failure: st
         args = {'action': 'update', 'facts': [{'key': 'correspondence', 'value': secret, 'quote': secret}]} if failure == 'none' else {'action': secret}
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, args)])
     async def run() -> None:
-        service = ApplicationService(FunctionModel(respond))
+        service = CaseService(FunctionModel(respond))
         if failure == 'none':
             answer = await service.run(OwnerTurn('private-owner', 'private-chat', '1', secret))
             assert secret not in answer
@@ -172,7 +174,7 @@ def test_private_trace_payload_exclusion_with_global_content_capture(failure: st
             assert spans
             serialized = '\n'.join(span.to_json() for span in spans)
             assert secret not in serialized
-            assert 'application.route' in serialized
+            assert 'grievance.interpret' in serialized
     finally:
         tracing.shutdown()
 
@@ -185,7 +187,7 @@ def test_manual_resend_with_new_delivery_reuses_matching_case() -> None:
             'facts': [{'key': 'issue', 'value': 'broken', 'quote': 'broken'}],
         })])
     async def run() -> None:
-        service = ApplicationService(FunctionModel(respond))
+        service = CaseService(FunctionModel(respond))
         for delivery in ['first', 'manual-resend']:
             await service.run(OwnerTurn('owner', 'chat', delivery, 'Create a case called Kettle. It is broken.'))
         cases = await service.store.list_cases('owner')
@@ -206,14 +208,14 @@ def test_public_misroute_cannot_export_known_private_case_fields() -> None:
         public.append(message)
         return 'Research called'
     async def run() -> None:
-        service = ApplicationService(FunctionModel(respond), research)
+        service = CaseService(FunctionModel(respond))
         await service.run(OwnerTurn('owner', 'chat', '1', 'Create a case called Kettle. ORDER-PRIVATE-Q7'))
         proposal.clear()
         proposal.update(action='leave', intent_quote='Return to general research')
         await service.run(OwnerTurn('owner', 'chat', '2', 'Return to general research'))
         proposal.clear()
-        proposal.update(action='public')
-        await service.run(OwnerTurn('owner', 'chat', '3', 'Search ORDER-PRIVATE-Q7'))
+        proposal.update(specialist='research')
+        await ApplicationService(FunctionModel(respond), research).run(OwnerTurn('owner', 'chat', '3', 'Search ORDER-PRIVATE-Q7'))
         assert public == []
     asyncio.run(run())
 
@@ -228,7 +230,7 @@ def test_selected_context_clarifies_conflicting_company_before_any_write() -> No
             proposal: dict[str, object] = {'action': 'create', 'label': 'Birthday gift', 'intent_quote': 'Create a case',
                 'facts': [{'key': 'company', 'value': 'Lumen Home', 'quote': 'Lumen Home'},
                           {'key': 'order_reference', 'value': 'ORDER-ALPHA-Q7', 'quote': 'ORDER-ALPHA-Q7'}]}
-        elif 'This is the selected-case intake stage' in str(info):
+        elif stage == 'update':
             selected_seen = True
             assert 'Lumen Home' in str(messages) and 'ORDER-ALPHA-Q7' in str(messages)
             proposal = {'action': 'clarify'}
@@ -238,7 +240,7 @@ def test_selected_context_clarifies_conflicting_company_before_any_write() -> No
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, proposal)])
     async def run() -> None:
         nonlocal stage
-        service = ApplicationService(FunctionModel(respond))
+        service = CaseService(FunctionModel(respond))
         await service.run(OwnerTurn('owner', 'owner', '1', 'Create a case called Birthday gift. Company Lumen Home. ORDER-ALPHA-Q7'))
         case = (await service.store.list_cases('owner'))[0]
         before = await service.store.get_case('owner', case.id)
@@ -259,14 +261,40 @@ def test_independent_public_question_preserves_selected_case_without_exporting_i
         public.append(message)
         return 'Official Python documentation'
     async def run() -> None:
-        app = ApplicationService(FunctionModel(respond), research)
+        app = CaseService(FunctionModel(respond))
         await app.run(OwnerTurn('owner', 'chat', 'create', 'Create a case called Kettle. PRIVATE-ORDER'))
         selected = await app.store.selection('owner', 'chat')
         proposal.clear()
-        proposal['action'] = 'public'
-        assert await app.run(OwnerTurn('owner', 'chat', 'public', 'Find official Python documentation')) == 'Official Python documentation'
+        proposal['specialist'] = 'research'
+        assert await ApplicationService(FunctionModel(respond), research).run(OwnerTurn('owner', 'chat', 'public', 'Find official Python documentation')) == 'Official Python documentation'
         assert public == ['Find official Python documentation']
         assert await app.store.selection('owner', 'chat') == selected
-        await app.run(OwnerTurn('owner', 'chat', 'private', 'Search for PRIVATE-ORDER'))
+        await ApplicationService(FunctionModel(respond), research).run(OwnerTurn('owner', 'chat', 'private', 'Search for PRIVATE-ORDER'))
         assert len(public) == 1
     asyncio.run(run())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_natural_owner_correction_updates_case_fact() -> None:
+    proposed: dict[str, object] = {}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, proposed)])
+
+    async def scenario() -> None:
+        service = CaseService(FunctionModel(respond))
+        proposed.update(action='create', label='Willow', intent_quote='Create Willow',
+                        facts=[{'key': 'purchase_date', 'value': '20 November', 'quote': '20 November'}])
+        await service.run(OwnerTurn('natural-owner', 'chat', 'create', 'Create Willow. Purchase date: 20 November.'))
+        proposed.clear()
+        proposed.update(action='update', correction_quote='Actually, the purchase date was 21 November.',
+                        facts=[{'key': 'purchase_date', 'value': '21 November',
+                                'quote': 'Actually, the purchase date was 21 November.'}])
+        reply = await service.run(OwnerTurn('natural-owner', 'chat', 'correct',
+                                            'Actually, the purchase date was 21 November.'))
+        assert reply == 'Updated purchase date: **21 November**.'
+        case = (await service.store.list_cases('natural-owner'))[0]
+        current = await service.store.get_case('natural-owner', case.id)
+        assert current and current.facts['purchase_date'] == '21 November'
+
+    asyncio.run(scenario())

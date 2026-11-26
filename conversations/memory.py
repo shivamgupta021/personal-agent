@@ -20,8 +20,9 @@ from research import constants
 
 
 class ConversationMemoryRunner:
-    def __init__(self, model: Model) -> None:
+    def __init__(self, model: Model, *, read_only: bool = False) -> None:
         self.model = model
+        self.read_only = read_only
         self.agent: Agent[None, str] = Agent(model, instructions=MEMORY_INSTRUCTIONS,
             name='conversation_memory', retries=constants.AGENT_VALIDATION_RETRIES,
             model_settings={'max_tokens': MAX_OUTPUT_TOKENS})
@@ -31,11 +32,13 @@ class ConversationMemoryRunner:
                        forget: Callable[[], Awaitable[str]], recall: ArchiveRecall, facts: FactCleanup) -> AgentRunResult[str]:
         preferences = PreferenceService(self.model, facts, private=True)
         editor = FactEditor(self.model, facts, private=True)
+        tools = [Tool(recall.recall_conversation)]
+        if not self.read_only:
+            tools.extend([Tool(preferences.manage_preferences), Tool(forget, name='forget_conversation'),
+                          Tool(editor.edit_conversation_fact)])
         return await self.agent.run(message, message_history=context.messages,
             instructions=CONVERSATION_INSTRUCTIONS + await preferences.instructions(),
             capabilities=[ConversationCompaction(context, private=True)],
-            toolsets=[FunctionToolset(tools=[Tool(preferences.manage_preferences),
-                Tool(forget, name='forget_conversation'), Tool(recall.recall_conversation),
-                Tool(editor.edit_conversation_fact)])],
+            toolsets=[FunctionToolset(tools=tools)],
             usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS, tool_calls_limit=constants.MAX_TOOL_CALLS),
             timeout=constants.RUN_TIMEOUT_SECONDS)

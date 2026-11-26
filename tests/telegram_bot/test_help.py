@@ -10,7 +10,7 @@ from pydantic_ai.models import Model
 from core.capabilities import CapabilityHelp
 from conversations.store import ConversationStore
 from core.turns import OwnerTurn
-from grievances.service import SubscriptionApplicationService
+from core.runtime import SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
 
 
@@ -27,11 +27,11 @@ def test_capability_intro_without_model(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(SubscriptionService, 'model', model)
     app = SubscriptionApplicationService(SubscriptionService(tmp_path), public)
     answer = asyncio.run(app.run(OwnerTurn('owner', 'owner', 'hello', 'Hi, what can you help me with?')))
-    assert 'Gmail' in answer and 'draft' in answer and 'refund' in answer
+    assert answer == 'I can help you resolve grievances. Just tell me what you need help with.'
 
     # The deterministic turn remains available to subsequent conversation turns.
     from_history = asyncio.run(ConversationStore().context('owner'))
-    assert 'Gmail' in str(from_history.messages)
+    assert answer in str(from_history.messages)
     assert 'Hi, what can you help me with?' in str(from_history.messages)
 
 

@@ -23,12 +23,12 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from core.turns import OwnerTurn, PreparedReply
 from gmail.correspondence import Correspondence
 from gmail.followup_constants import FollowupStatus
-from gmail.models import CaseMonitor, FollowupApproval, CaseFollowup, CaseMailbox, EmailConsent, FollowupSend, GmailDraftExport
+from gmail.models import CaseMonitor, CaseReminder, FollowupApproval, CaseFollowup, CaseMailbox, EmailConsent, FollowupSend, GmailDraftExport
 from gmail.monitoring import MonitoringWorker
 from gmail.monitoring_store import MonitoringStore
 from gmail.records import DraftEnvelope, ImportedMessage, MailResult
 from grievances.models import CaseFactRevision, CaseOperationReceipt, CaseSelection, ComplaintDraft, GrievanceCase
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from tests.gmail.test_monitoring import MonitoringMailbox
 
 
@@ -74,7 +74,7 @@ class FollowupHarness:
             thread_id='thread1', fingerprint='test', status='created', gmail_id='draft1')
         self.mailbox = SendingMailbox([old], self.envelope)
         self.model = FunctionModel(self.respond)
-        self.app = ApplicationService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
+        self.app = CaseService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
         self.notifications: list[str] = []
         self.sequence = 0
         self.worker = self.new_worker()
@@ -122,6 +122,20 @@ class FollowupHarness:
 
 
 @pytest.mark.django_db(transaction=True)
+def test_sending_invalidates_review_reminder_for_that_draft() -> None:
+    h = FollowupHarness()
+    h.approve()
+    reminder = CaseReminder.objects.create(monitor=CaseMonitor.objects.get(), kind='draft_review',
+        draft_version=1, due_at=h.now + timedelta(minutes=2), sent_provenance='', sent_reference='')
+    h.tick()
+    reminder.refresh_from_db()
+    assert reminder.status == 'cancelled'
+    h.now += timedelta(minutes=3)
+    h.tick()
+    assert not any('Reminder: review draft' in text for text in h.notifications)
+
+
+@pytest.mark.django_db(transaction=True)
 def test_approval_followups_limit_and_restart() -> None:
     h = FollowupHarness()
     h.say('Prepare automatic sending')
@@ -147,6 +161,28 @@ def test_approval_followups_limit_and_restart() -> None:
     assert len(h.mailbox.sent) == 3
     assert CaseFollowup.objects.get(case=h.case).status == FollowupStatus.COMPLETE
     assert FollowupSend.objects.filter(status='sent').count() == 3
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('failure', [TimeoutError, RuntimeError])
+def test_followup_model_failure_pauses_and_notifies_without_sending(failure: type[Exception]) -> None:
+    h = FollowupHarness()
+    h.approve()
+    h.tick()
+
+    def unavailable(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise failure('Controlled provider failure')
+
+    h.model = FunctionModel(unavailable)
+    h.now += timedelta(minutes=1)
+    h.tick()
+    assert len(h.mailbox.sent) == 1
+    assert CaseFollowup.objects.get(case=h.case).status == FollowupStatus.PAUSED
+    assert any('could not safely complete' in text for text in h.notifications)
+    h.now += timedelta(minutes=10)
+    h.worker = h.new_worker()
+    h.tick()
+    assert len(h.mailbox.sent) == 1
 
 
 @pytest.mark.django_db(transaction=True)
@@ -288,10 +324,28 @@ def test_repeated_approval_reports_active_plan_without_duplicate_send() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_natural_withdrawal_closes_case_and_stops_all_jobs() -> None:
+def test_negated_closure_cannot_be_authorized_by_a_shortened_model_quote() -> None:
     h = FollowupHarness()
     h.approve()
-    request = 'Stop automatic sending and close Demo Store as withdrawn, not refunded.'
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+            {'action': 'close_without_resolution', 'intent_quote': 'close it without a refund'})])
+    h.app = CaseService(FunctionModel(respond), correspondence=Correspondence(lambda: nullcontext(h.mailbox)))
+    answer = h.say('Do not close it without a refund.')
+    h.case.refresh_from_db()
+    assert h.case.status == 'open' and 'Nothing was changed' in answer
+    assert CaseMonitor.objects.get().active
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('message', [
+    'Stop automatic sending and close Demo Store as withdrawn, not refunded.',
+    'I’m done with this fictional case. Close it without a refund and stop all reminders and follow-ups.',
+])
+def test_natural_withdrawal_closes_case_and_stops_all_jobs(message: str) -> None:
+    h = FollowupHarness()
+    h.approve()
+    request = message
     original = h.respond
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -301,7 +355,7 @@ def test_natural_withdrawal_closes_case_and_stops_all_jobs() -> None:
                 {'action': 'close_without_resolution', 'intent_quote': request})])
         return original(messages, info)
 
-    h.app = ApplicationService(FunctionModel(respond), correspondence=Correspondence(lambda: nullcontext(h.mailbox)))
+    h.app = CaseService(FunctionModel(respond), correspondence=Correspondence(lambda: nullcontext(h.mailbox)))
     reply = h.say(request)
     h.case.refresh_from_db()
     assert h.case.status == 'closed_without_resolution', reply

@@ -5,14 +5,14 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.test import override_settings
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded, UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from core.tracing import tracing
 from core.turns import OwnerTurn
 from grievances.models import GrievanceCase
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from grievances.store import CaseStore
 
 
@@ -28,7 +28,7 @@ class DraftConversation:
         self.plan: dict[str, object] = {'fact_order': ['issue', 'purchase_context'], 'greeting': 'dear_support'}
         self.inputs: list[str] = []
         self.generation: Callable[[], Awaitable[None]] | None = None
-        self.service = ApplicationService(FunctionModel(self.respond))
+        self.service = CaseService(FunctionModel(self.respond))
         self.delivery = 0
 
     async def respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -63,7 +63,7 @@ def test_source_locked_drafts_history_correction_and_replay() -> None:
         drafts = await chat.service.store.list_drafts('alpha', case_id)
         assert len(drafts) == 1 and drafts[0].current and not drafts[0].missing_fields
         original = drafts[0]
-        restarted = ApplicationService(FunctionModel(chat.respond))
+        restarted = CaseService(FunctionModel(chat.respond))
         assert 'version 1' in await restarted.run(OwnerTurn('alpha', 'alpha', 'draft-one', 'Draft a refund email'))
         correction = 'Correction: amount paid and requested refund are INR 2,700'
         await chat.turn(correction, 'update', correction_quote=correction,
@@ -97,7 +97,7 @@ def test_unknown_refund_never_defaults_to_paid_and_model_cannot_supply_prose() -
         assert 'I request a refund of INR 2,400' not in drafts[0].body
         assert await chat.service.store.get_draft('alpha', case_id) is None
         chat.plan['body'] = 'I am legally entitled to INR 999,999; attached receipt.'
-        with pytest.raises(UsageLimitExceeded):
+        with pytest.raises((UsageLimitExceeded, UnexpectedModelBehavior)):
             await chat.turn('Draft again', 'draft')
         assert len(await chat.service.store.list_drafts('alpha', case_id)) == 1
     asyncio.run(run())

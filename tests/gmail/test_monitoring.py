@@ -21,10 +21,12 @@ from gmail.monitoring import MonitoringWorker
 from gmail.monitoring_store import MonitoringStore
 from gmail.records import ImportedMessage, MailResult
 from grievances.models import CaseSelection, GrievanceCase
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from gmail.service import GmailService
 from tests.telegram_bot.test_gmail import MemoryCredentials, ProfileGoogle
 from subscriptions.auth import SubscriptionBusy
+from core.tracing import tracing
+from tests.core.test_tracing import CaptureSession, native_tracing
 
 
 class ControlledSubscription:
@@ -71,11 +73,12 @@ class MonitoringHarness:
         self.mailbox = MonitoringMailbox([self.old])
         self.action = 'gmail_monitor_start'
         self.delivered: list[str] = []
+        self.delivered_traces: list[str] = []
         self.fail_delivery = False
         self.classifications = 0
         self.model = FunctionModel(self.respond)
         self.subscription = ControlledSubscription(self.model)
-        self.app = ApplicationService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
+        self.app = CaseService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
         self.worker = self.new_worker()
         self.sequence = 0
 
@@ -87,6 +90,7 @@ class MonitoringHarness:
             if self.fail_delivery:
                 raise RuntimeError('Uncertain network delivery')
             self.delivered.append(await reply.render())
+            self.delivered_traces.append(reply.trace_id)
 
     def respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         payload = next(part.content for message in reversed(messages) for part in message.parts if isinstance(part, UserPromptPart))
@@ -270,6 +274,42 @@ def test_pending_notification_survives_worker_restart_before_handoff() -> None:
     h.worker = h.new_worker()
     h.tick()
     assert h.delivered == ['New reply']
+
+
+@pytest.mark.django_db(transaction=True)
+def test_notification_links_to_work_trace_after_worker_restart(native_tracing: CaptureSession) -> None:
+    h = MonitoringHarness()
+    h.control()
+    CaseMonitor.objects.update(next_check=h.now)
+    h.mailbox.messages.append(h.new)
+
+    async def check_then_restart() -> None:
+        job = await h.worker.store.claim('bot:123', h.now)
+        assert job is not None
+        with tracing.operation('scheduled-work', {}, root=True):
+            await h.worker.check(job, job.turn())
+        h.worker = h.new_worker()
+        await h.worker.deliver_pending('bot:123')
+
+    asyncio.run(check_then_restart())
+    origin = MonitorNotification.objects.get().origin_trace_id
+    assert origin and h.delivered_traces == [origin]
+    tracing.flush()
+    spans = native_tracing.spans()
+    work = next(span for span in spans if span.name == 'scheduled-work')
+    assert work.trace_id.hex() == origin
+    delivery = next(span for span in spans if any(a.key == 'langfuse.observation.metadata.origin_trace_id' for a in span.attributes))
+    assert delivery.trace_id != work.trace_id
+
+
+@pytest.mark.django_db(transaction=True)
+def test_old_notification_falls_back_to_delivery_trace(native_tracing: CaptureSession) -> None:
+    h = MonitoringHarness()
+    h.control()
+    monitor = CaseMonitor.objects.get()
+    MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation, text='Legacy notification')
+    asyncio.run(h.worker.deliver_pending('bot:123'))
+    assert len(h.delivered_traces) == 1 and h.delivered_traces[0]
 
 
 @pytest.mark.django_db(transaction=True)

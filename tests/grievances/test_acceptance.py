@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from grievances.acceptance import AcceptanceGate
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from core.turns import OwnerTurn
 from telegram_bot.client import TelegramClient, TelegramError
 from telegram_bot.service import TelegramService
@@ -58,7 +58,7 @@ def test_committed_case_operations_survive_failed_telegram_delivery(tmp_path: Pa
                     with pytest.raises(TelegramError):
                         await poller.poll_once()
                 requests = len(chat.inputs)
-                restarted = ApplicationService(chat.service.model)
+                restarted = CaseService(chat.service.model)
                 poller = TelegramService(TelegramClient(client), PollingState(tmp_path), 7, restarted.prepare, identity='alpha')
                 await poller.poll_once()
                 assert len(chat.inputs) == requests

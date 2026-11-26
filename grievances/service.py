@@ -1,4 +1,4 @@
-"""Route private intake before any public conversation history or web-enabled agent."""
+"""Grievance specialist: interpret case requests and execute case workflows."""
 
 import asyncio
 from dataclasses import replace
@@ -14,11 +14,9 @@ from gmail.assistance import CaseAssistance
 from gmail.followups import FollowupService
 from gmail.errors import GmailError
 from attachments.reader import AttachmentReader
-from gmail.onboarding import GmailConnectionRequested, ConnectionAttempt
+from gmail.onboarding import GmailConnectionRequested
 from gmail.drafts import GmailDraftService
-from gmail.correspondence import Correspondence, CONSENT_MESSAGE
-from gmail.factory import GmailFactory
-from gmail.planner import GmailQueryPlanner
+from gmail.correspondence import Correspondence
 from gmail.reply_checks import GmailReplyChecks
 from gmail.monitoring_store import MonitoringStore
 from gmail.reminder_store import ReminderStore
@@ -26,15 +24,13 @@ from django.utils import timezone
 from core.actions import CaseAction
 from asgiref.sync import sync_to_async
 from gmail.errors import GmailDisconnected
-from core.errors import ReplySavedDraftFailed, user_error_message
+from core.errors import ReplySavedDraftFailed
 from core.turns import OwnerTurn, PreparedReply
 from grievances.ownership import CaseOwnership
 from grievances.deletion import CaseDeletionService
 from grievances.cleanup import CaseTraceCleanup
-from core.tracing import tracing
 from preferences.inspection import PreferenceInspection
 from preferences.store import PreferenceStore
-from preferences.runner import PreferenceRunner
 from grievances import constants
 from grievances.drafts import DraftService
 from grievances.policy import PolicyResearchService, PublicResearchBoundary
@@ -44,24 +40,18 @@ from grievances.progress_store import ProgressChanged, ProgressStore
 from grievances.schema import IntakeAction
 from grievances.store import CaseStore
 from grievances.plan import CasePlan
-from grievances.intake import CaseIntake, DRAFT_ACTIONS, POLICY_ACTIONS, PROGRESS_ACTIONS, GENERAL_ACTIONS
-from grievances.lifecycle import ApplicationTurn
-from subscriptions.service import SubscriptionService
-from conversations.constants import DELETE_CONVERSATION_PHRASES
-from conversations.service import ConversationService
-from conversations.memory import ConversationMemoryRunner
-from conversations.direct import DirectConversation
+from grievances.intake import CaseIntake, DRAFT_ACTIONS, POLICY_ACTIONS, PROGRESS_ACTIONS
+from core.lifecycle import ApplicationTurn
 
 
-class ApplicationService:
-    def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None, *, firecrawl: Firecrawl | None = None, trace_cleanup: CaseTraceCleanup | None = None, correspondence: Correspondence | None = None, progress: Callable[[PreparedReply], Awaitable[None]] | None = None) -> None:
+class CaseService:
+    def __init__(self, model: Model, *, firecrawl: Firecrawl | None = None, trace_cleanup: CaseTraceCleanup | None = None, correspondence: Correspondence | None = None, progress: Callable[[PreparedReply], Awaitable[None]] | None = None) -> None:
         self.plan = CasePlan(progress)
         self.correspondence = correspondence or Correspondence()
         self.store = CaseStore()
         self.deletion = CaseDeletionService(trace_cleanup)
         self.firecrawl = firecrawl
         self.model = model
-        self.public_run = public_run
         self.intake = CaseIntake(model, self.store)
         self.turns = ApplicationTurn(trace_cleanup)
 
@@ -72,9 +62,9 @@ class ApplicationService:
         return (await self.deletion.delete(turn, case_id)).message
 
     async def prepare(self, turn: OwnerTurn) -> PreparedReply:
-        return await self.turns.prepare(turn, self._execute)
+        return await self.turns.prepare(turn, self.execute)
 
-    async def _execute(self, turn: OwnerTurn, epoch: int) -> str:
+    async def execute(self, turn: OwnerTurn, epoch: int) -> str:
         try:
             async with asyncio.timeout(constants.RUN_TIMEOUT_SECONDS):
                 return await self._run(turn, epoch)
@@ -92,8 +82,6 @@ class ApplicationService:
             accepted = await self.correspondence.accept(turn.owner_id)
             pending = await self.correspondence.pending_goal(turn)
             return await self._run(replace(turn, text=pending), epoch) if pending else accepted
-        if self.is_memory_control(turn.text):
-            return await self.memory(turn)
         replay = await GmailDraftService.replay(turn) or await self.store.replay(turn)
         if replay:
             return replay
@@ -224,29 +212,6 @@ class ApplicationService:
             if action.action == 'draft':
                 return await DraftService(self.model, self.store).run(turn, selection, current, usage)
             return await self.store.read_drafts(turn, selection, current, action.draft_version, listing=action.action == 'list_drafts')
-        if action.action in GENERAL_ACTIONS and not await self.store.general_allowed(turn, epoch):
-            return 'Case material cannot become general memory or public research. Please send a new independent request.'
-        if action.action == 'list_preferences':
-            if action.facts:
-                return 'Case facts cannot become general memory. Please ask separately about saved preferences.'
-            return await PreferenceInspection().run(turn)
-        if action.action == 'preference':
-            if action.facts:
-                return 'Case facts cannot become general memory. Please clarify the preference to manage.'
-            return await ConversationService(turn.owner_id, PreferenceRunner(self.model, usage, action.preference_intent)).run(turn.text)
-        if action.action in ('conversation', 'memory'):
-            if action.facts:
-                return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'
-            if action.action == 'conversation' and action.conversation_reply and intake.conversation is not None:
-                if not await self.store.general_allowed(replace(turn, text=action.conversation_reply), epoch):
-                    return 'Case material cannot become general conversation history. Please ask about the case directly.'
-                return await DirectConversation().save(turn, action.conversation_reply, intake.conversation)
-            return await self.memory(turn)
-        if action.action == 'public':
-            if action.facts:
-                return 'Please send an independent public question without case facts.'
-            with tracing.public_content():
-                return await self.public_run(turn.text) if self.public_run else 'Public research is unavailable in this session.'
         if action.action == 'show' and action.requested_fact_keys and current:
             answer = '\n'.join(f'**{key.replace("_", " ").capitalize()}:** {current.facts.get(key, "Not recorded yet")}' for key in action.requested_fact_keys)
         else:
@@ -292,106 +257,3 @@ class ApplicationService:
                 IntakeAction(action='gmail_followup_propose', intent_quote=request.text,
                     draft_version=action.version or None), timezone.now())
         return 'That action is unavailable.'
-
-    @staticmethod
-    def is_memory_control(message: str) -> bool:
-        control = message.strip().rstrip('.!').casefold()
-        return control in DELETE_CONVERSATION_PHRASES or control == 'retry trace cleanup'
-
-    async def memory(self, turn: OwnerTurn) -> str:
-        with tracing.operation('application.memory', {'message': turn.text}, kind='agent', private=True) as span:
-            answer = await ConversationService(turn.owner_id, ConversationMemoryRunner(self.model)).run(turn.text)
-            tracing.record_output(span, {'answer': answer})
-            return answer
-
-
-class PublicResearchRequested(Exception):
-    """Unwind the private subscription session before entering public research."""
-
-
-class SubscriptionApplicationService:
-    """Open the subscription transport for one normalized application turn."""
-
-    def __init__(self, subscription: SubscriptionService, public_run: Callable[[str], Awaitable[str]],
-                 connect_gmail: Callable[[OwnerTurn, str, bool], Awaitable[ConnectionAttempt]] | None = None,
-                 progress: Callable[[PreparedReply], Awaitable[None]] | None = None) -> None:
-        self.connection_task: asyncio.Task[None] | None = None
-        self.progress = progress
-        self.subscription = subscription
-        self.connect_gmail = connect_gmail
-        self.public_run = public_run
-
-    async def run(self, turn: OwnerTurn) -> str:
-        return await (await self.prepare(turn)).render()
-
-    async def prepare(self, turn: OwnerTurn) -> PreparedReply:
-        return await ApplicationTurn().prepare(turn, self._execute)
-
-    async def _execute(self, turn: OwnerTurn, epoch: int) -> str:
-        if ApplicationService.is_memory_control(turn.text):
-            return await self.public_run(turn.text)
-        try:
-            async with self.subscription.model() as model:
-                return await ApplicationService(model, self.defer_public,
-                    correspondence=Correspondence(GmailFactory.mailbox, GmailQueryPlanner(model), GmailFactory.require_connection), progress=self.progress)._execute(turn, epoch)
-        except GmailConnectionRequested as request:
-            if self.connect_gmail is None:
-                return 'Gmail connection setup is available through the Telegram application on this Mac.'
-            if self.progress is not None:
-                if self.connection_task is not None and not self.connection_task.done():
-                    return 'Gmail consent is already open on this Mac. Complete it there; I’ll continue automatically.'
-                self.connection_task = asyncio.create_task(self._connect_in_background(replace(turn.followup(), callback=turn.callback), request, epoch))
-                return 'I’m opening Gmail consent on this Mac. You can keep chatting while I wait; I’ll continue your case when access is ready.'
-            return await self._connect_and_resume(turn, request, epoch)
-        except PublicResearchRequested:
-            if epoch != await CaseOwnership().epoch(turn.owner_id):
-                return 'Case content was deleted. Please send a new public request.'
-            with tracing.public_content():
-                return await self.public_run(turn.text)
-
-    async def _connect_and_resume(self, turn: OwnerTurn, request: GmailConnectionRequested, epoch: int) -> str:
-        if self.connect_gmail is None:
-            return 'Gmail connection is unavailable.'
-        original_selection = await CaseStore().selection(turn.owner_id, turn.conversation_id)
-        connected = await self.connect_gmail(turn, request.email, request.compose)
-        if not connected.connected:
-            return connected.message
-        if epoch != await CaseOwnership().epoch(turn.owner_id):
-            return connected.message + ' The case changed; please send a new request.'
-        selection = await CaseStore().selection(turn.owner_id, turn.conversation_id)
-        if selection.case_id != original_selection.case_id:
-            return connected.message + ' Your selected case changed; tell me which case to continue.'
-        if turn.callback and CaseAction.verify(turn.callback, turn.owner_id, epoch):
-            await Correspondence.accept(turn.owner_id)
-        pending = await Correspondence().pending_goal(turn)
-        if pending and await Correspondence.consented(turn.owner_id):
-            resumed = await self._execute(replace(turn.followup(), text=pending, callback=''), epoch)
-            return resumed
-        if pending:
-            return connected.message + '\n\n' + CONSENT_MESSAGE
-        return connected.message + ' Tell me which email or case you need help with.'
-
-    async def _connect_in_background(self, turn: OwnerTurn, request: GmailConnectionRequested, epoch: int) -> None:
-        async def complete(current: OwnerTurn, current_epoch: int) -> str:
-            if current_epoch != epoch:
-                return 'The case changed before Gmail connection started. Please send a new request.'
-            try:
-                return await self._connect_and_resume(current, request, epoch)
-            except Exception as error:
-                return user_error_message(error) + ' Please send your request again.'
-
-        reply = await ApplicationTurn().prepare(turn, complete)
-        if self.progress is not None:
-            await self.progress(reply)
-
-    async def finish_connections(self) -> None:
-        if self.connection_task is not None:
-            await self.connection_task
-
-    async def close(self) -> None:
-        if self.connection_task is not None:
-            self.connection_task.cancel()
-            await asyncio.gather(self.connection_task, return_exceptions=True)
-
-    async def defer_public(self, message: str) -> str:
-        raise PublicResearchRequested

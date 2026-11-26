@@ -29,6 +29,7 @@ class EmailSafeExporter(SpanExporter):
     SAFE_KEYS = frozenset(('langfuse.observation.type', 'gen_ai.operation.name',
         'gen_ai.request.model', 'gen_ai.response.model', 'gen_ai.system', 'gen_ai.provider.name',
         'langfuse.session.id', 'application.route', 'email.content_omitted',
+        'langfuse.observation.metadata.origin_trace_id',
         'gmail.results', 'gmail.messages', 'gmail.truncated', 'gmail.query_count'))
 
     def __init__(self, exporter: SpanExporter) -> None:

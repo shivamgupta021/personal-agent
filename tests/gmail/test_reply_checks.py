@@ -18,7 +18,7 @@ from gmail.records import ImportedMessage, MailResult
 from gmail.reply_checks import GmailReplyChecks
 from grievances.models import CaseOperationReceipt, CaseSelection, ComplaintDraft, GrievanceCase, SentReport
 from grievances.store import CaseView, SelectionView
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 
 
 class ReplyMailbox(Mailbox):
@@ -195,7 +195,7 @@ def test_natural_reply_request_routes_through_public_application_turn() -> None:
             return harness.respond(messages, info)
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
             {'action': 'gmail_check_replies', 'case_id': str(harness.case.pk)})])
-    app = ApplicationService(FunctionModel(respond),
+    app = CaseService(FunctionModel(respond),
         correspondence=Correspondence(lambda: nullcontext(harness.mailbox)))
     answer = asyncio.run(app.run(OwnerTurn('owner', 'chat', 'public-check', 'Did they reply to my refund request?')))
     assert 'Refund approved.' in answer

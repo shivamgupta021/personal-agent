@@ -9,9 +9,10 @@ import httpx2
 import pytest
 
 from core.actions import CaseAction
+from core.service import ApplicationService
 from core.turns import OwnerTurn
 from gmail.models import CaseFollowup
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from pydantic_ai.models.function import FunctionModel
 from telegram_bot.client import TelegramClient
 from telegram_bot.presentation import ReplyPresentation
@@ -26,14 +27,14 @@ def test_case_access_is_one_prompt_and_button_resumes(tmp_path: Path) -> None:
     h = AssistanceHarness(tmp_path)
     async def scenario() -> None:
         h.text = 'Help me get my Kettle refund'
-        first = await ApplicationService(FunctionModel(h.model), correspondence=h.correspondence).run(OwnerTurn('test:7', 'test:7', 'first', h.text))
+        first = await CaseService(FunctionModel(h.model), correspondence=h.correspondence).run(OwnerTurn('test:7', 'test:7', 'first', h.text))
         assert 'Plan for Kettle' in first
         assert 'I agree to' not in first
         assert h.searches == 0
         token = re.search(r'action://([^)]*)', first)
         assert token
         h.text = 'Help me get my Kettle refund'
-        answer = await ApplicationService(FunctionModel(h.model), correspondence=h.correspondence).run(OwnerTurn('test:7', 'test:7', 'button', 'Continue with Gmail', callback=token[1]))
+        answer = await CaseService(FunctionModel(h.model), correspondence=h.correspondence).run(OwnerTurn('test:7', 'test:7', 'button', 'Continue with Gmail', callback=token[1]))
         assert h.searches == 1
         assert 'does not confirm a refund' in answer
     try:
@@ -48,8 +49,9 @@ def test_approval_button_binds_generation_and_never_resends() -> None:
     proposal = h.say('Prepare automatic sending')
     token = re.search(r'action://([^)]*)', proposal)
     assert token
+    app = ApplicationService(h.model, correspondence=h.app.correspondence)
     async def approve(delivery: str) -> str:
-        return await h.app.run(OwnerTurn('bot:123', 'chat', delivery, 'Approve & send', callback=token[1]))
+        return await app.run(OwnerTurn('bot:123', 'chat', delivery, 'Approve & send', callback=token[1]))
     assert 'approved' in asyncio.run(approve('click1'))
     assert 'another email' in asyncio.run(approve('click2'))
     assert CaseFollowup.objects.get(case=h.case).status == 'active'

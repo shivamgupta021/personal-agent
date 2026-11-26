@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Track work in shivamgupta021/personal-agent, a private repository.
+Track work in shivamgupta021/personal-agent.
 Use the gh CLI from this checkout. Verify the target repository
 before creating issues.
 

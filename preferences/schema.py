@@ -1,4 +1,4 @@
-"""Validated preference intent shared by routing and execution."""
+"""Preference specialist proposals validated against the current user request."""
 from typing import Literal
 from pydantic import BaseModel, Field
 from preferences import constants

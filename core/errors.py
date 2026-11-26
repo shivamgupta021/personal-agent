@@ -20,9 +20,9 @@ def user_error_message(error: Exception) -> str:
     if type(error) is RuntimeError and str(error) in SAFE_CONFIGURATION_ERRORS:
         return str(error)
     if isinstance(error, TimeoutError):
-        return 'Research timed out. Try a narrower question.'
+        return 'This request timed out. Please try again.'
     if isinstance(error, UsageLimitExceeded):
-        return 'Research stopped at its execution limit. Try a narrower question.'
+        return 'This request reached its execution limit. Please try a smaller task.'
     if isinstance(error, RunCancelled):
-        return 'Research cancelled.'
+        return 'This request was cancelled.'
     return 'Command failed. Check service connectivity and subscription access. Provider details are hidden.'

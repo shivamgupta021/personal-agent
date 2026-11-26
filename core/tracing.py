@@ -27,6 +27,11 @@ _application_producer: ContextVar[bool] = ContextVar('application_trace_producer
 
 
 class Tracing:
+    @staticmethod
+    def current_trace_id() -> str:
+        context = get_current_span().get_span_context()
+        return format(context.trace_id, '032x') if context.is_valid else ''
+
     def __init__(self) -> None:
         self._provider: TracerProvider | None = None
 

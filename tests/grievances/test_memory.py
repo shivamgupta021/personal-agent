@@ -13,7 +13,9 @@ from conversations.memory import ConversationMemoryRunner
 from conversations.service import ConversationService
 from core.tracing import tracing
 from core.turns import OwnerTurn
-from grievances.service import ApplicationService, SubscriptionApplicationService
+from core.service import ApplicationService
+from grievances.service import CaseService
+from core.runtime import SubscriptionApplicationService
 from preferences.store import PreferenceStore
 from subscriptions.service import SubscriptionService
 
@@ -26,9 +28,11 @@ def test_selected_case_preserves_private_preference_management_and_forgetting() 
     seen_tools: list[str] = []
     exporter = InMemorySpanExporter()
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        data = json.loads(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart) and isinstance(p.content, str))) if 'You route owner requests' in str(info) or 'PREFERENCE_AUTHORIZATION' in str(info) or 'FACT_EDIT_REDACTION' in str(info) else {}
+        data = json.loads(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart) and isinstance(p.content, str))) if 'You interpret grievance requests' in str(info) or 'PREFERENCE_AUTHORIZATION' in str(info) or 'FACT_EDIT_REDACTION' in str(info) else {}
         proposal: dict[str, Any]
-        if 'You route owner requests' in str(info):
+        if info.output_tools and 'specialist' in info.output_tools[0].parameters_json_schema.get('properties', {}):
+            proposal = {'specialist': 'grievance' if current_request.startswith(('Create', 'Show')) else 'conversation'}
+        elif 'You interpret grievance requests' in str(info):
             if after_forgetting:
                 assert secret not in str(messages)
             if current_request.startswith('Create'):
@@ -66,9 +70,9 @@ def test_selected_case_preserves_private_preference_management_and_forgetting() 
                 assert 'forgotten' in answer.lower()
                 assert await PreferenceStore().list('owner') == []
                 after_forgetting = True
-        case = (await service.store.list_cases('owner'))[0]
-        assert (await service.store.selection('owner', 'owner')).case_id == case.id
-        view = await service.store.get_case('owner', case.id)
+        case = (await service.cases.store.list_cases('owner'))[0]
+        assert (await service.cases.store.selection('owner', 'owner')).case_id == case.id
+        view = await service.cases.store.get_case('owner', case.id)
         assert view and view.facts == {'order_reference': 'PRIVATE-ORDER'} and secret not in str(view)
         assert seen_tools and 'search' not in seen_tools and 'read_page' not in seen_tools
     tracing.shutdown()
@@ -91,7 +95,7 @@ def test_exact_conversation_deletion_works_without_model_credentials_and_preserv
     def unavailable(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         raise AssertionError('Deletion cannot call a model')
     async def run() -> None:
-        service = ApplicationService(FunctionModel(create))
+        service = CaseService(FunctionModel(create))
         await service.run(OwnerTurn('owner', 'owner', '1', 'Create a case called Kettle'))
         case = (await service.store.list_cases('owner'))[0]
         memory = ConversationService('owner', ConversationMemoryRunner(FunctionModel(unavailable)))

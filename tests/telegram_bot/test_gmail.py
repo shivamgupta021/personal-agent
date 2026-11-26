@@ -29,7 +29,7 @@ import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from telegram_bot.client import TelegramClient
 from telegram_bot.service import TelegramService
 from telegram_bot.state import PollingState
@@ -47,7 +47,7 @@ def test_gmail_search_explains_processing_before_mail_access(tmp_path: Path) -> 
     async def run() -> None:
         model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(
             info.output_tools[0].name, {'action': 'gmail_search'})]))
-        app = ApplicationService(model)
+        app = CaseService(model)
         async with httpx2.AsyncClient(base_url='https://telegram.invalid', transport=httpx2.MockTransport(telegram)) as http:
             await TelegramService(TelegramClient(http), PollingState(tmp_path), 7, app.prepare, identity='test:7').poll_once()
     asyncio.run(run())
@@ -71,7 +71,7 @@ def test_email_consent_persists_without_fetching_mail(tmp_path: Path) -> None:
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://telegram.invalid', transport=httpx2.MockTransport(telegram)) as http:
             for _ in range(2):
-                app = ApplicationService(FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(
+                app = CaseService(FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(
                     info.output_tools[0].name, {'action': 'gmail_search'})])))
                 await TelegramService(TelegramClient(http), PollingState(tmp_path), 7, app.prepare, identity='test:7').poll_once()
     asyncio.run(run())
@@ -226,7 +226,7 @@ class MailHarness:
             return httpx2.Response(200, json={'ok': True, 'result': {}})
         async def public(message: str) -> str:
             raise AssertionError('Private Gmail must not reach public research')
-        app = ApplicationService(FunctionModel(self.model), public, correspondence=self.correspondence)
+        app = CaseService(FunctionModel(self.model), correspondence=self.correspondence)
         async with httpx2.AsyncClient(base_url='https://telegram.invalid', transport=httpx2.MockTransport(telegram)) as http:
             await TelegramService(TelegramClient(http), PollingState(self.directory), 7, app.prepare, identity='test:7').poll_once()
         return self.answers[-1]
@@ -251,7 +251,7 @@ def test_gmail_failures_never_import_unselected_or_stale_mail(tmp_path: Path, fa
             harness.fail_read = True
         if failure == 'deleted_during_read':
             def remove() -> None:
-                app = ApplicationService(FunctionModel(harness.model))
+                app = CaseService(FunctionModel(harness.model))
                 async_to_sync(app.run)(OwnerTurn('test:7', 'test:7', 'parallel-delete', 'Delete case Kettle'))
             harness.on_read = remove
         answer = await harness.send('Select Gmail candidate ' + ('not-offered' if failure == 'wrong_reference' else reference[1]))

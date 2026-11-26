@@ -26,7 +26,7 @@ from gmail.models import CaseMailbox, CaseFollowup, GmailDraftExport
 from gmail.records import DraftEnvelope, ImportedMessage, MailResult
 from gmail.revisions import DraftRevisions
 from gmail.monitoring_store import MonitoringStore
-from grievances.lifecycle import ApplicationTurn
+from core.lifecycle import ApplicationTurn
 from grievances.schema import IntakeAction
 from grievances.store import CaseView, SelectionView
 
@@ -88,7 +88,13 @@ class FollowupWorker:
             if job is None:
                 return
             async def execute(turn: OwnerTurn, epoch: int) -> str:
-                return await self.execute(job)
+                try:
+                    return await self.execute(job)
+                except TimeoutError:
+                    # ApplicationTurn presents timeouts as replies. Persist the worker's
+                    # stopping decision before that foreground error conversion.
+                    await self.store.pause(job, 'I could not safely complete this follow-up because it timed out. Please review the case.')
+                    raise
             try:
                 await ApplicationTurn().prepare(job.turn(), execute)
             except asyncio.CancelledError:

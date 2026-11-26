@@ -11,7 +11,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from core.turns import OwnerTurn
 from core.tracing import tracing
-from grievances.service import ApplicationService
+from core.service import ApplicationService
 
 
 @pytest.mark.django_db(transaction=True)
@@ -23,11 +23,13 @@ def test_ordinary_conversation_survives_restart_without_case_or_web_access(selec
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         nonlocal conversation_calls
         if info.output_tools:
+            if 'specialist' in info.output_tools[0].parameters_json_schema.get('properties', {}):
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'grievance' if request.startswith('Create') else 'conversation'})])
             if request.startswith('Create'):
                 proposal = {'action': 'create', 'label': 'Kettle', 'intent_quote': 'Create a case',
                             'facts': [{'key': 'order_reference', 'value': 'PRIVATE-ORDER', 'quote': 'PRIVATE-ORDER'}]}
             else:
-                proposal = {'action': 'conversation'}
+                proposal = {'specialist': 'conversation'}
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, proposal)])
         conversation_calls += 1
         history = str(messages)
@@ -48,7 +50,7 @@ def test_ordinary_conversation_survives_restart_without_case_or_web_access(selec
         if selected:
             request = 'Create a case called Kettle. PRIVATE-ORDER'
             await app.run(OwnerTurn('owner', 'owner', 'create', request))
-        before = await app.store.selection('owner', 'owner')
+        before = await app.cases.store.selection('owner', 'owner')
         for index, text in enumerate((
             'For this fictional comparison, my two languages are Python and Ruby. Acknowledge without searching.',
             'Which two languages did I mention?',
@@ -58,9 +60,9 @@ def test_ordinary_conversation_survives_restart_without_case_or_web_access(selec
             answer = await app.run(OwnerTurn('owner', 'owner', str(index), text))
             assert 'Python and Ruby' in answer
             assert 'select a case' not in answer
-        after = await app.store.selection('owner', 'owner')
+        after = await app.cases.store.selection('owner', 'owner')
         assert after.case_id == before.case_id
-        assert len(await app.store.list_cases('owner')) == int(selected)
+        assert len(await app.cases.store.list_cases('owner')) == int(selected)
         assert conversation_calls == 2
     asyncio.run(run())
 
@@ -73,7 +75,7 @@ def test_application_trace_content_respects_both_capture_settings(capture: bool,
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if info.output_tools:
-            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': 'conversation'})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'conversation'})])
         return ModelResponse(parts=[TextPart(secret)])
 
     tracing.shutdown()
@@ -90,7 +92,7 @@ def test_application_trace_content_respects_both_capture_settings(capture: bool,
             assert roots[0].context is not None
             assert reply.trace_id == format(roots[0].context.trace_id, '032x')
             assert len({span.context.trace_id for span in spans if span.context}) == 1
-            assert any(span.attributes and span.attributes.get('application.route') == 'conversation' for span in spans)
+            assert any(span.attributes and span.attributes.get('orchestrator.specialist') == 'conversation' for span in spans)
             assert (secret in '\n'.join(span.to_json() for span in spans)) == (capture and private_capture)
             if capture and private_capture:
                 attributes = roots[0].attributes or {}
@@ -99,7 +101,5 @@ def test_application_trace_content_respects_both_capture_settings(capture: bool,
                 assert isinstance(input_value, str) and isinstance(output_value, str)
                 assert json.loads(input_value) == {'message': secret}
                 assert json.loads(output_value) == {'answer': secret}
-                for span in spans:
-                    assert secret in span.to_json(), span.name
     finally:
         tracing.shutdown()

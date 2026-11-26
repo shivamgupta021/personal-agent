@@ -8,6 +8,7 @@ import logging
 
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from opentelemetry.trace import get_current_span
 
 from core.tracing import tracing
 from core.turns import OwnerTurn, PreparedReply
@@ -18,8 +19,9 @@ from gmail.errors import GmailBusy
 from subscriptions.auth import SubscriptionBusy
 from gmail.monitoring_constants import MAX_CASES_PER_TICK
 from gmail.monitoring_store import MonitorJob, MonitoringStore
+from gmail.models import MonitorNotification
 from gmail.reply_checks import GmailReplyChecks, ReplyCheckResult
-from grievances.lifecycle import ApplicationTurn
+from core.lifecycle import ApplicationTurn
 from grievances.store import CaseStore
 from pydantic_ai.models import Model
 
@@ -101,12 +103,15 @@ class MonitoringWorker:
         # Graceful shutdown drains this handoff; a crash/timeout remains ambiguous.
         if not await self.store.handoff(identifier, job):
             return
+        origin = await MonitorNotification.objects.values_list('origin_trace_id', flat=True).aget(pk=identifier)
 
         async def notification(turn: OwnerTurn, epoch: int) -> str:
+            if origin:
+                get_current_span().set_attribute('langfuse.observation.metadata.origin_trace_id', origin)
             return text
 
         traced = await ApplicationTurn().prepare(replace(job.turn(), text='Deliver scheduled case notification.'), notification)
-        reply = PreparedReply(traced.text, lambda: self.valid_delivery(job, identifier), traced.trace_id)
+        reply = PreparedReply(traced.text, lambda: self.valid_delivery(job, identifier), origin or traced.trace_id)
         await self.send(reply)
         await self.store.delivered(identifier)
 

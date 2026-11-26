@@ -1,4 +1,4 @@
-"""Persist a plain conversational answer already produced during routing."""
+"""Persist a completed specialist answer in conversation history."""
 import asyncio
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart, CompactionPart

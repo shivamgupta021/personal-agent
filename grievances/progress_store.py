@@ -142,10 +142,10 @@ class ProgressStore:
         explicit = bool(pattern and re.match(pattern + r'(?:[.!]|$)', turn.text.strip(), re.IGNORECASE))
         if outcome == 'closed_without_resolution':
             names = '|'.join(re.escape(name) for name in (current.label, current.facts.get('company', '')) if name)
-            target = rf'(?:this(?: fictional test)? case|the case|{names})'
+            target = rf'(?:it|this(?: fictional(?: test)?)? case|the case|{names})'
             explicit = explicit or bool(re.search(
-                rf'(?:^|[.!]\s*|\band\s+)(?:close|withdraw)\s+{target}\s+(?:as withdrawn|without resolution)(?:[,;.!]|$)',
-                intent_quote, re.IGNORECASE))
+                rf'(?:^|[.!]\s*|\band\s+)(?:close|withdraw)\s+{target}\s+(?:as withdrawn|without resolution|without (?:a )?refund)(?:[,;.!]|\s+and\b|$)',
+                turn.text, re.IGNORECASE))
         if not intent_quote or intent_quote not in turn.text or not explicit:
             return 'Please explicitly state your own outcome: “I consider this case resolved” or “Close this case without resolution”. Nothing was changed.'
         with CaseMutation(turn, selection, current, operation='progress') as mutation:

@@ -1,8 +1,10 @@
 # Personal Agent
 
-A local Django project with a real research agent using your ChatGPT subscription, Pydantic AI, and your existing Firecrawl service. Django supplies application startup, settings, logging, and management commands. Owner-only Telegram, persistent conversation memory, preferences, and the refund-first grievance workflow use the same application services. External sending is not available.
+A local, owner-only personal assistant focused on refund grievances. Talk to it in Telegram; it can research policies, read receipts and relevant Gmail threads, prepare drafts, and pursue a bounded follow-up plan after your approval. Built with Python, Django, Pydantic AI, PostgreSQL, Firecrawl, and Langfuse. Model access currently uses a locally authenticated ChatGPT subscription.
 
-## Current checkpoint (23 November 2026)
+This is a personal-development project, not a hosted multi-user service. Gmail credentials currently require macOS Keychain, and Desktop OAuth consent completes on the same Mac running the bot. A refund outcome is never guaranteed.
+
+## Current checkpoint (26 November 2026)
 
 | Capability | Status |
 | --- | --- |
@@ -13,6 +15,9 @@ A local Django project with a real research agent using your ChatGPT subscriptio
 | Revisions preserving manual Gmail edits | Implemented (#46); reads the selected Gmail draft and creates a new version; live acceptance recorded below |
 | On-demand reply and sent-state checks | Implemented (#47); selected thread only, separate verified and owner-reported status |
 | Background monitoring and reminders | Implemented (#48–#49); independent scheduler bundled with `telegram` |
+| Approved sending and bounded automatic follow-ups | Implemented; fictional live test verified sending, firmer follow-ups, new-offer pause, and case closure |
+
+The orchestrator delegates to grievance, research, attachment, conversation, and preference specialists. Services enforce ownership and approval before executing model proposals. Fixed help/inspection requests and signed buttons bypass model routing. The optional `ROUTINE_TOOLS_ENABLED` path combines preference interpretation or case inspection with routing in one model call. Specialists return the final reply without an extra model call just to rephrase it.
 
 Test the user experience in the private Telegram bot, not with internal candidate IDs:
 
@@ -32,7 +37,7 @@ uv run python manage.py evaluate_gmail_replies
 
 These use the real subscription model with synthetic Gmail responses, publish a Langfuse experiment, and return its URL. Boolean checks verify the flow; inspect the synthetic answer and MIME draft for semantic quality too.
 
-For local Gmail onboarding, ask for refund help in Telegram. If disconnected, the assistant asks for your Gmail address; reply “Connect Gmail for YOUR_ADDRESS”. Google consent opens on this Mac, and the original case request is retained. After connection, acknowledge email processing when asked so the case can continue. Initial consent requests reading and draft creation together, so drafting does not need a second consent step. No terminal command is needed for this user flow. The operator fallback is `uv run python manage.py gmail_connect --email YOUR_ADDRESS`. Consent requires your browser approval and expires after three minutes; while it is pending, Telegram turns wait, and graceful shutdown can wait for that timeout. Google’s compose scope includes sending permission; this app exposes only draft creation, never send. Failed authorization preserves the existing connection. Draft creation records intent first; uncertain outcomes are never blindly retried. A later request can recover a positively matched draft using its export marker, but an inconclusive bounded lookup remains unresolved and requires inspection.
+For local Gmail onboarding, ask for refund help in Telegram and use the **Connect Gmail** button in the case plan. Google consent opens on this Mac, and the original request is retained. Initial consent requests reading and compose permissions together. The operator fallback is `uv run python manage.py gmail_connect --email YOUR_ADDRESS`. Browser consent expires after three minutes; other Telegram messages can continue while it is pending. If consent expires, the retry button retains the case action. Failed authorization preserves an existing connection. Sending requires separate approval of a case-bound sending plan, even though the OAuth compose scope permits it. Draft creation records intent first; uncertain outcomes are never blindly retried. An inconclusive recovery lookup requires inspection.
 
 ### Gmail review workflow
 
@@ -42,14 +47,14 @@ For local Gmail onboarding, ask for refund help in Telegram. If disconnected, th
 
 A Gmail web link uses the message ID returned by Google, not the draft container ID. The compose link was verified in Chrome against the exact Hosteller draft. Gmail does not document it as an API permalink contract; native-mobile behavior is not guaranteed. Mailbox/subject fallback is always retained. Opening an existing draft refreshes its message ID because manual edits may replace that ID. Sending or deleting it may make a previously returned link stale.
 
-Revision limits: attachments, Cc/Bcc, HTML-only or oversized draft content stop the revision rather than silently dropping content. Sending remains unavailable. Missing drafts do not prove sending; verification requires matching SENT mail, while owner-reported sending remains a separate source.
+Revision limits: attachments, Cc/Bcc, HTML-only or oversized draft content stop the revision rather than silently dropping content. Sending requires an approved plan. Missing drafts do not prove sending; verification requires matching SENT mail, while owner-reported sending remains a separate source.
 
 ### Attachment reading
 
-Send a PDF, PNG/JPEG photo or UTF-8 text file to the Telegram bot with a question
-such as “What is the amount and booking reference?”. It extracts text locally
+Send a PDF, PNG/JPEG photo or UTF-8 text file to the Telegram bot, for example with
+“Here’s my receipt.” It extracts text locally
 (with English OCR for scanned PDFs and images), then uses one model call to answer
-with filename/page references. Subsequent questions can use saved extracted evidence.
+with a short summary of key details and useful filename/page references. Subsequent questions can use saved extracted evidence.
 With a case selected, uploads belong to that case and can inform its Gmail drafts;
 otherwise they belong to conversation history. They are evidence, not automatically
 confirmed facts or preferences.

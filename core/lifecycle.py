@@ -2,6 +2,9 @@
 
 from collections.abc import Awaitable, Callable
 
+from opentelemetry.trace import Status, StatusCode
+
+from core.errors import user_error_message
 from core.tracing import tracing
 from core.capabilities import CapabilityHelp
 from core.email_telemetry import email_private
@@ -46,7 +49,11 @@ class ApplicationTurn:
                     elif not turn.uploads and CapabilityHelp.matches(turn.text) and await CaseStore().general_allowed(turn, epoch):
                         text = await CapabilityHelp().run(turn)
                     else:
-                        text = await execute(turn, epoch)
+                        try:
+                            text = await execute(turn, epoch)
+                        except TimeoutError as error:
+                            span.set_status(Status(StatusCode.ERROR, 'Request timed out'))
+                            text = user_error_message(error)
                 else:
                     text = control.message
                     if control.deleted:
