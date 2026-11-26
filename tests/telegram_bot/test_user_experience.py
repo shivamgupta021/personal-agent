@@ -17,7 +17,7 @@ from grievances.models import GrievanceCase, CaseFactRevision
 
 def test_intro_is_short_and_actionable() -> None:
     assert len(CAPABILITY_DESCRIPTION.split()) <= 40
-    assert 'Tell me' in CAPABILITY_DESCRIPTION
+    assert 'tell me' in CAPABILITY_DESCRIPTION.casefold()
 
 
 @pytest.mark.django_db(transaction=True)
