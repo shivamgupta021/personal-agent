@@ -273,6 +273,37 @@ def test_pending_notification_survives_worker_restart_before_handoff() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
+def test_shutdown_finishes_inflight_notification_and_does_not_repeat_it() -> None:
+    h = MonitoringHarness()
+    h.control()
+    monitor = CaseMonitor.objects.get()
+    note = MonitorNotification.objects.create(monitor=monitor, generation=monitor.generation, text='New reply')
+
+    async def scenario() -> None:
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def send(reply: PreparedReply) -> None:
+            entered.set()
+            await release.wait()
+            await h.send(reply)
+
+        worker = MonitoringWorker(h.subscription.model, lambda: nullcontext(h.mailbox), send, clock=lambda: h.now)
+        task = asyncio.create_task(worker.tick('bot:123'))
+        await entered.wait()
+        task.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    note.refresh_from_db()
+    assert note.delivered
+    h.tick()
+    assert h.delivered == ['New reply']
+
+
+@pytest.mark.django_db(transaction=True)
 def test_replayed_start_does_not_undo_a_later_stop() -> None:
     h = MonitoringHarness()
     h.control()
