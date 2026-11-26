@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from core.tracing import tracing
 from core.turns import OwnerTurn, PreparedReply
+from core.workers import drain_on_cancel
 from gmail.mailbox import Mailbox
 from gmail.followups import FollowupWorker
 from gmail.errors import GmailBusy
@@ -90,20 +91,24 @@ class MonitoringWorker:
                     continue
                 if not await self.valid_delivery(job, identifier):
                     continue
-                # Persist BEFORE external handoff. A crash/timeout is ambiguous, never blindly resent.
-                if not await self.store.handoff(identifier, job):
-                    continue
-                async def notification(turn: OwnerTurn, epoch: int) -> str:
-                    return text
-
-                traced = await ApplicationTurn().prepare(replace(job.turn(), text='Deliver scheduled case notification.'), notification)
-                reply = PreparedReply(traced.text, lambda: self.valid_delivery(job, identifier), traced.trace_id)
-                await self.send(reply)
-                await self.store.delivered(identifier)
+                await drain_on_cancel(self.deliver_notification(identifier, job, text))
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.warning('Monitoring delivery unavailable; attempted handoffs will not be automatically resent')
+
+    async def deliver_notification(self, identifier: int, job: MonitorJob, text: str) -> None:
+        # Graceful shutdown drains this handoff; a crash/timeout remains ambiguous.
+        if not await self.store.handoff(identifier, job):
+            return
+
+        async def notification(turn: OwnerTurn, epoch: int) -> str:
+            return text
+
+        traced = await ApplicationTurn().prepare(replace(job.turn(), text='Deliver scheduled case notification.'), notification)
+        reply = PreparedReply(traced.text, lambda: self.valid_delivery(job, identifier), traced.trace_id)
+        await self.send(reply)
+        await self.store.delivered(identifier)
 
     async def valid_delivery(self, job: MonitorJob, identifier: int) -> bool:
         if not await self.store.valid(job) or not await self.store.notification_valid(identifier):

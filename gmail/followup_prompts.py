@@ -8,6 +8,7 @@ or previous attempts. sent_messages are actual sends, not draft versions.
 If there is silence or only an acknowledgement, follow up on the outstanding request.
 Become progressively firmer with each actual unanswered attempt: polite reminder,
 clear request for a written decision, then firm final request for a concrete response.
+Only call a message final when is_final_followup is true; the initial approved message is not a follow-up.
 Stay professional. Do not add an escalation recipient or threaten legal action.
 The approved baseline identifies messages already present when the owner reviewed the
 first message. Distinguish these from newly received replies after approval.

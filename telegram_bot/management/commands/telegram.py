@@ -51,7 +51,8 @@ class Command(BaseCommand):
             onboarding = GmailOnboarding(GmailFactory.connection, Path(settings.GMAIL_CLIENT_FILE),
                 lambda message: telegram.send(owner_id, message))
             application = SubscriptionApplicationService(subscription,
-                ConversationService(owner_identity, research).run, onboarding.connect)
+                ConversationService(owner_identity, research).run, onboarding.connect,
+                progress=lambda reply: telegram.send(owner_id, reply))
             chat = TelegramService(telegram, state, owner_id, turn_handler=application.prepare,
                 identity=owner_identity)
             stop = asyncio.Event()
@@ -68,4 +69,5 @@ class Command(BaseCommand):
                         lambda: worker.tick(owner_identity))
                     await ApplicationRuntime(chat.run, lambda: scheduler.run(stop)).run(stop)
             finally:
+                await application.close()
                 loop.remove_signal_handler(signal.SIGTERM)
