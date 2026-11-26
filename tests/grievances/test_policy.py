@@ -13,7 +13,7 @@ from core.tracing import tracing
 from core.turns import OwnerTurn
 from grievances.policy_fixtures import PolicyFixtures
 from grievances.policy_store import PolicyStore
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from research.tools.firecrawl import Firecrawl
 
 
@@ -34,7 +34,7 @@ class PolicyConversation:
         self.delivery = 0
         self.pause: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
-        self.service = ApplicationService(FunctionModel(self.respond), firecrawl=firecrawl)
+        self.service = CaseService(FunctionModel(self.respond), firecrawl=firecrawl)
 
     async def respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         schema = info.output_tools[0].parameters_json_schema.get('properties', {})
@@ -279,7 +279,7 @@ def test_inflight_draft_rejects_changed_public_brief() -> None:
 def test_selected_research_route_receives_authoritative_confirmation_status() -> None:
     class StatusAwareConversation(PolicyConversation):
         async def respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-            if self.action.get('action') == 'research' and 'This is the selected-case intake stage' in str(info):
+            if self.action.get('action') == 'research' and 'You interpret grievance requests' in str(info):
                 payload = str(messages)
                 assert 'research_status' in payload
                 assert '"confirmed": true' in payload

@@ -28,7 +28,7 @@ from gmail.monitoring import MonitoringWorker
 from gmail.monitoring_store import MonitoringStore
 from gmail.records import DraftEnvelope, ImportedMessage, MailResult
 from grievances.models import CaseFactRevision, CaseOperationReceipt, CaseSelection, ComplaintDraft, GrievanceCase
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from tests.gmail.test_monitoring import MonitoringMailbox
 
 
@@ -74,7 +74,7 @@ class FollowupHarness:
             thread_id='thread1', fingerprint='test', status='created', gmail_id='draft1')
         self.mailbox = SendingMailbox([old], self.envelope)
         self.model = FunctionModel(self.respond)
-        self.app = ApplicationService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
+        self.app = CaseService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
         self.notifications: list[str] = []
         self.sequence = 0
         self.worker = self.new_worker()
@@ -301,7 +301,7 @@ def test_natural_withdrawal_closes_case_and_stops_all_jobs() -> None:
                 {'action': 'close_without_resolution', 'intent_quote': request})])
         return original(messages, info)
 
-    h.app = ApplicationService(FunctionModel(respond), correspondence=Correspondence(lambda: nullcontext(h.mailbox)))
+    h.app = CaseService(FunctionModel(respond), correspondence=Correspondence(lambda: nullcontext(h.mailbox)))
     reply = h.say(request)
     h.case.refresh_from_db()
     assert h.case.status == 'closed_without_resolution', reply

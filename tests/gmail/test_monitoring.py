@@ -21,7 +21,7 @@ from gmail.monitoring import MonitoringWorker
 from gmail.monitoring_store import MonitoringStore
 from gmail.records import ImportedMessage, MailResult
 from grievances.models import CaseSelection, GrievanceCase
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from gmail.service import GmailService
 from tests.telegram_bot.test_gmail import MemoryCredentials, ProfileGoogle
 from subscriptions.auth import SubscriptionBusy
@@ -75,7 +75,7 @@ class MonitoringHarness:
         self.classifications = 0
         self.model = FunctionModel(self.respond)
         self.subscription = ControlledSubscription(self.model)
-        self.app = ApplicationService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
+        self.app = CaseService(self.model, correspondence=Correspondence(lambda: nullcontext(self.mailbox)))
         self.worker = self.new_worker()
         self.sequence = 0
 

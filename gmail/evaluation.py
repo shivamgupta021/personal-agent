@@ -30,7 +30,7 @@ from gmail.credentials import Connection
 from gmail.mailbox import Mailbox
 from gmail.planner import GmailQueryPlanner
 from gmail.service import GmailService
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from subscriptions.service import SubscriptionService
 
 
@@ -96,7 +96,7 @@ class GmailExperiment:
         return httpx2.Response(200, json={'id': 'b1', 'messages': [message]} if '/threads/' in request.url.path else message)
 
     @staticmethod
-    async def turn(app: ApplicationService, owner: str, delivery: str, request: str) -> str:
+    async def turn(app: CaseService, owner: str, delivery: str, request: str) -> str:
         # Only this mock-mailbox experiment uses readable wrappers; production privacy stays on.
         with tracing.operation('synthetic.gmail.turn', {'fixture': True, 'request': request}, kind='agent') as span:
             answer = await app.run(OwnerTurn(owner, owner, delivery, request))
@@ -116,7 +116,7 @@ class GmailExperiment:
             async with SubscriptionService(settings.SUBSCRIPTION_STATE_DIR).model() as raw_model:
                 model = SyntheticModelRecorder(raw_model)
                 model.records = []
-                app = ApplicationService(model, correspondence=Correspondence(lambda: nullcontext(mail), GmailQueryPlanner(model)))
+                app = CaseService(model, correspondence=Correspondence(lambda: nullcontext(mail), GmailQueryPlanner(model)))
                 requests = ['I agree to email processing', item.input['search']]
                 if self.drafts:
                     requests.append('Draft a reply in Gmail asking what happens next.')

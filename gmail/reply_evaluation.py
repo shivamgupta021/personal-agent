@@ -20,7 +20,7 @@ from gmail.models import GmailReplyCheckState
 from gmail.planner import GmailQueryPlanner
 from gmail.service import GmailService
 from grievances.models import CaseOutcome, ComplaintDraft
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from subscriptions.service import SubscriptionService
 
 
@@ -51,7 +51,7 @@ class GmailReplyExperiment(GmailExperiment):
             async with SubscriptionService(settings.SUBSCRIPTION_STATE_DIR).model() as raw_model:
                 model = SyntheticModelRecorder(raw_model)
                 model.records = []
-                app = ApplicationService(model, correspondence=Correspondence(lambda: nullcontext(mailbox), GmailQueryPlanner(model)))
+                app = CaseService(model, correspondence=Correspondence(lambda: nullcontext(mailbox), GmailQueryPlanner(model)))
                 await self.turn(app, owner, 'consent', 'I agree to email processing')
                 setup = await self.turn(app, owner, 'setup', 'Help me get my Lumen refund.')
                 self.checking = True

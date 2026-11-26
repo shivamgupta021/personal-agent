@@ -26,7 +26,7 @@ from gmail.models import CaseMailbox, CaseFollowup, GmailDraftExport
 from gmail.records import DraftEnvelope, ImportedMessage, MailResult
 from gmail.revisions import DraftRevisions
 from gmail.monitoring_store import MonitoringStore
-from grievances.lifecycle import ApplicationTurn
+from core.lifecycle import ApplicationTurn
 from grievances.schema import IntakeAction
 from grievances.store import CaseView, SelectionView
 

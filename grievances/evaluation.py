@@ -19,7 +19,7 @@ from pydantic_ai.settings import ModelSettings
 from conversations.evaluation import ConversationEvaluationReport
 from core.tracing import tracing
 from core.turns import OwnerTurn
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from subscriptions.service import SubscriptionService
 from research.tools.firecrawl import Firecrawl
 
@@ -60,8 +60,8 @@ class IntakeScenario:
         self.public_messages.append(message)
         return 'Public research boundary reached.'
 
-    def service(self) -> ApplicationService:
-        return ApplicationService(self.model, self.public, firecrawl=self.firecrawl)
+    def service(self) -> CaseService:
+        return CaseService(self.model, firecrawl=self.firecrawl)
 
     async def turn(self, message: str, *, delivery: str | None = None,
                    forbidden: tuple[str, ...] = ()) -> str:

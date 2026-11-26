@@ -19,7 +19,7 @@ from subscriptions.auth import SubscriptionBusy
 from gmail.monitoring_constants import MAX_CASES_PER_TICK
 from gmail.monitoring_store import MonitorJob, MonitoringStore
 from gmail.reply_checks import GmailReplyChecks, ReplyCheckResult
-from grievances.lifecycle import ApplicationTurn
+from core.lifecycle import ApplicationTurn
 from grievances.store import CaseStore
 from pydantic_ai.models import Model
 

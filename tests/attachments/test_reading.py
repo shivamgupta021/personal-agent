@@ -21,7 +21,7 @@ from grievances.models import CaseMessage, GrievanceCase
 from attachments.constants import MAX_FILE_BYTES
 from conversations.models import ConversationRecord
 from gmail.mailbox import Mailbox
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from telegram_bot.client import TelegramClient
 from telegram_bot.service import TelegramService
 from telegram_bot.state import PollingState
@@ -77,7 +77,7 @@ def test_owner_upload_is_read_once_and_saved_for_followup(tmp_path: Path) -> Non
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://api.telegram.org/botTEST/', transport=httpx2.MockTransport(telegram)) as http:
             service = TelegramService(TelegramClient(http), PollingState(tmp_path), 7,
-                ApplicationService(FunctionModel(model)).prepare, identity='owner')
+                CaseService(FunctionModel(model)).prepare, identity='owner')
             await service.poll_once()
             await service.poll_once()
     asyncio.run(run())
@@ -122,7 +122,7 @@ def test_deletion_during_attachment_answer_cannot_restore_the_file() -> None:
     async def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         await ConversationStore().forget('owner')
         return ModelResponse(parts=[TextPart('Sensitive receipt total.')])
-    answer = asyncio.run(ApplicationService(FunctionModel(model)).run(OwnerTurn('owner', 'owner', 'upload',
+    answer = asyncio.run(CaseService(FunctionModel(model)).run(OwnerTurn('owner', 'owner', 'upload',
         'Read this', (Upload('receipt.txt', 'text/plain', b'Sensitive receipt total 1250.', 'Telegram'),))))
     assert 'changed' in answer
     assert not ConversationRecord.objects.filter(identity='owner').exists()
@@ -140,7 +140,7 @@ def test_cancellation_drains_extraction_before_turn_closes(monkeypatch: pytest.M
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         raise AssertionError('Cancelled upload must not reach the model')
     async def run() -> None:
-        task = asyncio.create_task(ApplicationService(FunctionModel(model)).run(OwnerTurn('owner', 'owner', 'upload',
+        task = asyncio.create_task(CaseService(FunctionModel(model)).run(OwnerTurn('owner', 'owner', 'upload',
             'Read this', (Upload('receipt.txt', 'text/plain', b'receipt', 'Telegram'),))))
         assert await asyncio.to_thread(started.wait, 3)
         task.cancel()
@@ -176,7 +176,7 @@ def test_uploaded_case_receipt_is_available_to_gmail_draft_and_deleted_with_case
     async def run() -> None:
         await h.send('I agree to email processing')
         await h.send('Help me get my Kettle refund')
-        app = ApplicationService(FunctionModel(h.model), correspondence=h.correspondence)
+        app = CaseService(FunctionModel(h.model), correspondence=h.correspondence)
         answer = await app.run(OwnerTurn('test:7', 'test:7', 'upload-receipt', 'Read this receipt',
             (Upload('receipt.txt', 'text/plain', b'Receipt: INR 1250', 'Telegram'),)))
         assert '1250' in answer

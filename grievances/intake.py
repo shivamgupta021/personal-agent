@@ -12,17 +12,13 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.tracing import tracing
-from conversations.context import ConversationContext
-from conversations.store import ConversationStore
-from conversations.constants import MAX_INLINE_CONTEXT_BYTES
-from conversations.direct import DirectConversation
 from core.turns import OwnerTurn
 from gmail.models import CaseMailbox, EmailConsent, CaseReminder, CaseFollowup
 from grievances import constants
 from grievances.correspondence import CompanyReplyParser, ParsedCompanyReply
 from grievances.policy_store import PolicyStore
 from grievances.progress_store import ProgressSnapshot, ProgressStore
-from grievances.prompts import INTAKE_INSTRUCTIONS, SELECTED_INTAKE_INSTRUCTIONS
+from grievances.prompts import INTAKE_INSTRUCTIONS
 from grievances.schema import IntakeAction
 from grievances.models import CaseMessage
 from grievances.store import CaseStore, CaseView, SelectionView
@@ -33,7 +29,6 @@ DRAFT_ACTIONS = frozenset(('draft', 'list_drafts', 'read_draft'))
 POLICY_ACTIONS = frozenset(('review_research', 'confirm_research', 'research'))
 PROGRESS_ACTIONS = frozenset(('record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up'))
 SELECTED_ACTIONS = frozenset(('show', 'update')) | DRAFT_ACTIONS | POLICY_ACTIONS | PROGRESS_ACTIONS
-GENERAL_ACTIONS = frozenset(('conversation', 'memory', 'public', 'list_preferences', 'preference'))
 
 
 @dataclass(frozen=True)
@@ -48,7 +43,6 @@ class AuthorizedIntake:
     current: CaseView | None
     usage: RunUsage
     company_reply: ParsedCompanyReply | None
-    conversation: ConversationContext | None = None
 
 
 @dataclass(frozen=True)
@@ -57,7 +51,6 @@ class _IntakeContext:
     current: CaseView | None
     directory: dict[str, object]
     progress: ProgressSnapshot | None
-    conversation: ConversationContext | None = None
 
     def selected_payload(self, request: str) -> dict[str, object]:
         if self.current is None:
@@ -80,9 +73,9 @@ class _IntakeContext:
 
 
 class CaseIntake:
-    """Own directory/selected interpretation and current-message authorization.
+    """Interpret a case request once and validate current-message authorization.
 
-    Case facts enter model context only after a selected-case route. Each call owns
+    Only this specialist receives selected-case facts. Each call owns
     its usage budget, shared with subsequent drafting or policy research.
     """
 
@@ -90,7 +83,7 @@ class CaseIntake:
         self.store = store
         self.agent: Agent[str, IntakeAction] = Agent(
             model, deps_type=str, output_type=IntakeAction, instructions=INTAKE_INSTRUCTIONS,
-            name='main_agent', retries=constants.VALIDATION_RETRIES,
+            name='grievance_intake', retries=constants.VALIDATION_RETRIES,
             model_settings={'max_tokens': constants.MAX_OUTPUT_TOKENS})
         self.agent.instrument = tracing.private_instrumentation()
         self.agent.output_validator(self.validate_label)
@@ -107,34 +100,24 @@ class CaseIntake:
             return 'Please send a shorter case message. Nothing changed.'
         company_reply = CompanyReplyParser().parse(turn.text)
         context = await self._context(turn, epoch)
-        encoded = json.dumps(context.directory)
+        payload = dict(context.directory)
+        if context.current:
+            payload.update(context.selected_payload(turn.text))
+        encoded = json.dumps(payload)
         if len(encoded) > constants.MAX_CONTEXT_CHARS:
             return 'This case directory exceeds the intake context limit. Nothing changed.'
         usage = RunUsage()
-        with tracing.operation('application.route', context.directory, kind='agent', private=True) as span:
+        with tracing.operation('grievance.interpret', payload, kind='agent', private=True) as span:
             result = await self.agent.run(encoded, deps=turn.text, usage=usage,
                 usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                 timeout=constants.RUN_TIMEOUT_SECONDS)
-            span.set_attribute('application.route', result.output.action)
+            span.set_attribute('grievance.interpret', result.output.action)
             tracing.record_output(span, result.output.model_dump(mode='json'))
         action = result.output
-        if action.action in SELECTED_ACTIONS and context.current:
-            selected_payload = context.selected_payload(turn.text)
-            selected_encoded = json.dumps(selected_payload)
-            if len(selected_encoded) > constants.MAX_CONTEXT_CHARS:
-                return 'This case exceeds the intake context limit. Nothing changed.'
-            with tracing.operation('case.selected_intake', selected_payload, kind='agent', private=True) as span:
-                action = (await self.agent.run(selected_encoded, deps=turn.text, instructions=SELECTED_INTAKE_INSTRUCTIONS,
-                    usage=usage, usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
-                    timeout=constants.RUN_TIMEOUT_SECONDS)).output
-                span.set_attribute('application.route', action.action)
-                tracing.record_output(span, action.model_dump(mode='json'))
-            if action.action not in SELECTED_ACTIONS and action.action != 'clarify':
-                return 'Please clarify the intended case action. Nothing changed.'
         rejection = self._authorize(turn.text, action, context.selection, company_reply)
         if rejection is not None:
             return rejection
-        return AuthorizedIntake(action, context.selection, context.current, usage, company_reply, context.conversation)
+        return AuthorizedIntake(action, context.selection, context.current, usage, company_reply)
 
     async def _context(self, turn: OwnerTurn, epoch: int) -> _IntakeContext:
         selection = replace(await self.store.selection(turn.owner_id, turn.conversation_id), deletion_epoch=epoch)
@@ -150,15 +133,8 @@ class CaseIntake:
         pending = await CaseMailbox.objects.filter(case_id=current.id).afirst() if current else None
         reminder = await CaseReminder.objects.filter(monitor__mailbox_record__case_id=current.id).afirst() if current else None
         followup = await CaseFollowup.objects.filter(case_id=current.id).afirst() if current else None
-        saved_conversation = await ConversationStore().context(turn.owner_id)
-        conversation: ConversationContext | None = saved_conversation
-        dialogue = DirectConversation.dialogue(saved_conversation)
-        encoded_history = json.dumps(dialogue).encode()
-        if len(encoded_history) > MAX_INLINE_CONTEXT_BYTES or pending and pending.pending_question:
-            conversation = None
         directory: dict[str, object] = {
             'automatic_sending_plan': {'status': followup.status, 'draft_version': followup.draft_version, 'recipient': followup.envelope.get('recipient'), 'interval_minutes': followup.interval_minutes, 'max_followups': followup.max_followups} if followup else None,
-            'conversation_history': dialogue if conversation is not None else None,
             'reminder': {'kind': reminder.kind, 'draft_version': reminder.draft_version, 'status': reminder.status, 'deadline': reminder.due_at.isoformat(), 'question': reminder.reason} if reminder else None,
             'has_uploaded_attachments': bool(current and await CaseMessage.objects.filter(case_id=current.id, role='attachment').aexists()),
             'gmail_enabled': await EmailConsent.objects.filter(owner_id=turn.owner_id).aexists(),
@@ -170,10 +146,7 @@ class CaseIntake:
             'case_labels': [asdict(case) for case in cases],
             'saved_preferences': [{'key': p.key, 'value': p.value} for p in preferences],
         }
-        if len(json.dumps(directory)) > constants.MAX_CONTEXT_CHARS:
-            directory['conversation_history'] = None
-            conversation = None
-        return _IntakeContext(selection, current, directory, progress, conversation)
+        return _IntakeContext(selection, current, directory, progress)
 
     @staticmethod
     def _authorize(request: str, action: IntakeAction, selection: SelectionView,

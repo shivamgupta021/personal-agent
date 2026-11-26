@@ -10,7 +10,7 @@ from pydantic_ai.models import Model
 from core.capabilities import CapabilityHelp
 from conversations.store import ConversationStore
 from core.turns import OwnerTurn
-from grievances.service import SubscriptionApplicationService
+from core.runtime import SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
 
 

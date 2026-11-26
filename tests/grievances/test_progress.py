@@ -10,7 +10,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from core.errors import user_error_message
 from core.turns import OwnerTurn
 from grievances.progress_store import ProgressStore
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 
 
 FACTS = {'company': 'Lumen Home', 'purchase_context': 'kettle', 'issue': 'did not turn on',
@@ -27,7 +27,7 @@ class ProgressConversation:
         self.pause: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
         self.inputs: list[str] = []
-        self.service = ApplicationService(FunctionModel(self.respond))
+        self.service = CaseService(FunctionModel(self.respond))
 
     async def respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         self.inputs.append(str(messages))
@@ -189,7 +189,7 @@ def test_combined_reply_followup_replay_and_close_without_resolution() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize('unsafe_action', ['update', 'resolve', 'record_sent', 'public'])
+@pytest.mark.parametrize('unsafe_action', ['update', 'resolve', 'record_sent', 'research'])
 def test_company_instructions_cannot_authorize_case_mutations_or_web(unsafe_action: str) -> None:
     async def run() -> None:
         chat = ProgressConversation()
@@ -248,7 +248,7 @@ def test_cancellation_after_reply_commit_preserves_replayable_partial_success() 
             await pending
         snapshot = await ProgressStore().snapshot('alpha', case_id)
         assert snapshot and len(snapshot.replies) == 1
-        restarted = ApplicationService(FunctionModel(chat.respond))
+        restarted = CaseService(FunctionModel(chat.respond))
         replay = await restarted.run(OwnerTurn('alpha', 'alpha', 'cancelled-generation', message))
         assert 'Company reply saved; no follow-up draft was saved' in replay
         assert await restarted.store.list_drafts('alpha', case_id) == []

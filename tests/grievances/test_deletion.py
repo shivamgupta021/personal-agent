@@ -11,7 +11,9 @@ from core.turns import OwnerTurn, PreparedReply
 from core.tracing import tracing
 from preferences.store import PreferenceStore
 from conversations.store import ConversationStore
-from grievances.service import ApplicationService, SubscriptionApplicationService
+from core.service import ApplicationService
+from grievances.service import CaseService
+from core.runtime import SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
 from grievances.progress_store import ProgressStore
 from tests.grievances.test_progress import ProgressConversation
@@ -28,7 +30,7 @@ def test_delete_invalidates_prepared_content_and_replay_preserves_other_case() -
     model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, proposal)]))
 
     async def run() -> None:
-        app = ApplicationService(model)
+        app = CaseService(model)
         original = OwnerTurn('owner', 'chat', '1', 'Create Lumen')
         prepared = await app.prepare(original)
         first = (await app.store.list_cases('owner'))[0]
@@ -41,7 +43,7 @@ def test_delete_invalidates_prepared_content_and_replay_preserves_other_case() -
         assert not await prepared.valid()
         assert await app.store.get_case('owner', first.id) is None
         assert [case.label for case in await app.store.list_cases('owner')] == ['Cobalt']
-        assert 'nothing was recreated' in await ApplicationService(model).run(original)
+        assert 'nothing was recreated' in await CaseService(model).run(original)
         assert len(await app.store.list_cases('owner')) == 1
     asyncio.run(run())
 
@@ -58,7 +60,7 @@ def test_inflight_create_cannot_commit_or_replay_after_deletion() -> None:
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
                 'action': 'create', 'label': 'new' if awaitable else 'old',
                 'intent_quote': 'Create new' if awaitable else 'Create old'})])
-        app = ApplicationService(FunctionModel(respond))
+        app = CaseService(FunctionModel(respond))
         await app.run(OwnerTurn('owner', 'chat', 'old', 'Create old'))
         old = (await app.store.list_cases('owner'))[0]
         original = OwnerTurn('owner', 'other-chat', 'new', 'Create new')
@@ -68,7 +70,7 @@ def test_inflight_create_cannot_commit_or_replay_after_deletion() -> None:
         resume.set()
         await pending
         assert await app.store.list_cases('owner') == []
-        await ApplicationService(FunctionModel(respond)).run(original)
+        await CaseService(FunctionModel(respond)).run(original)
         assert await app.store.list_cases('owner') == []
     asyncio.run(run())
 
@@ -80,7 +82,7 @@ def test_telegram_checks_prepared_reply_before_each_chunk() -> None:
         # Prepare a long response at the transport seam, with the application's guard.
         model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
             {'action': 'create', 'label': 'Lumen', 'intent_quote': 'Create Lumen'})]))
-        app = ApplicationService(model)
+        app = CaseService(model)
         prepared = await app.prepare(OwnerTurn('owner', 'chat', 'create', 'Create Lumen'))
         case = (await app.store.list_cases('owner'))[0]
         long_reply = PreparedReply('private ' * 1000, prepared.check)
@@ -100,7 +102,7 @@ def test_trace_cleanup_waits_for_closed_observed_producer_and_confirms_absence()
     async def run() -> None:
         model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
             {'action': 'create', 'label': 'Lumen', 'intent_quote': 'Create Lumen'})]))
-        app = ApplicationService(model)
+        app = CaseService(model)
         await app.run(OwnerTurn('owner', 'chat', 'create', 'Create Lumen'))
         case = (await app.store.list_cases('owner'))[0]
         registry = CaseTraceRegistry()
@@ -108,7 +110,7 @@ def test_trace_cleanup_waits_for_closed_observed_producer_and_confirms_absence()
         assert await registry.register('owner', case.id, trace)
         assert not await registry.register('other', case.id, trace)
         async with httpx2.AsyncClient(base_url='https://trace.invalid', transport=httpx2.MockTransport(lambda request: httpx2.Response(503))) as failed_client:
-            await ApplicationService(model, trace_cleanup=CaseTraceCleanup(failed_client)).run(OwnerTurn('owner', 'chat', 'delete', 'Delete this case'))
+            await CaseService(model, trace_cleanup=CaseTraceCleanup(failed_client)).run(OwnerTurn('owner', 'chat', 'delete', 'Delete this case'))
         calls = []
         visible = False
         deleted = False
@@ -217,7 +219,7 @@ def test_failed_producer_flush_and_http_failure_remain_pending_after_restart(mon
         trace = 'c' * 32
         assert await registry.register('alpha', case_id, trace)
         async with httpx2.AsyncClient(base_url='https://trace.invalid', transport=httpx2.MockTransport(lambda request: httpx2.Response(503))) as failed_client:
-            await ApplicationService(chat.service.model, trace_cleanup=CaseTraceCleanup(failed_client)).delete_case(OwnerTurn('alpha', 'alpha', 'delete', 'Delete this case'), case_id)
+            await CaseService(chat.service.model, trace_cleanup=CaseTraceCleanup(failed_client)).delete_case(OwnerTurn('alpha', 'alpha', 'delete', 'Delete this case'), case_id)
         original_flush = tracing.flush
         monkeypatch.setattr(tracing, 'flush', lambda: False)
         await registry.close('alpha', trace)
@@ -279,8 +281,9 @@ def test_literal_case_reply_cannot_become_general_memory_or_public_input(action:
         reply = 'Our private offer is a replacement plus CASE-SECRET-VOUCHER.'
         await chat.turn('Company reply: ' + reply, 'record_reply', reply_text=reply)
         await chat.turn('Leave this case', 'leave', intent_quote='Leave this case')
-        result = await chat.turn('Remember this: ' + reply, action)
-        assert 'cannot become general memory or public research' in result
+        model = FunctionModel(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'research' if action == 'public' else 'conversation'})]))
+        result = await ApplicationService(model).run(OwnerTurn('alpha', 'alpha', 'leak', 'Remember this: ' + reply))
+        assert 'includes case details' in result
         assert await PreferenceStore().list('alpha') == []
         context = await ConversationStore().context('alpha')
         assert context.messages == []
@@ -298,7 +301,7 @@ def test_deletion_before_general_classification_cannot_export_old_private_turn(a
         async def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
             entered.set()
             await resume.wait()
-            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': action})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'research' if action == 'public' else 'conversation'})])
         public_calls: list[str] = []
         async def public_run(message: str) -> str:
             public_calls.append(message)
@@ -323,7 +326,7 @@ def test_independent_general_memory_contains_no_case_context_during_concurrent_d
         entered, resume = asyncio.Event(), asyncio.Event()
         async def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
             if info.output_tools:
-                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': 'memory'})])
+                return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'conversation'})])
             assert 'ORDER-ALPHA' not in str(messages) and 'Lumen kettle' not in str(messages)
             entered.set()
             await resume.wait()
@@ -364,7 +367,7 @@ def test_deleted_details_question_is_answered_without_retrieval_or_mutation(setu
         def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
                 {'action': 'clarify', 'clarification_reason': 'deleted_details'})])
-        app = ApplicationService(FunctionModel(respond), public)
+        app = CaseService(FunctionModel(respond))
         answer = await app.run(OwnerTurn('alpha', 'alpha', 'deleted-question', 'Do you still have deleted case details?'))
         assert "can't retrieve deleted case details" in answer.lower()
         assert 'your case was deleted' not in answer.lower()

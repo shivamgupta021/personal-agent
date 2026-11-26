@@ -14,7 +14,8 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from core.turns import OwnerTurn
-from grievances.service import ApplicationService, SubscriptionApplicationService
+from grievances.service import CaseService
+from core.runtime import SubscriptionApplicationService
 from telegram_bot.client import TelegramClient, TelegramError
 from telegram_bot.service import TelegramService
 from telegram_bot.state import PollingState
@@ -34,7 +35,7 @@ def test_failed_reply_preserves_committed_case_and_normalized_replay(tmp_path: P
             }]})
         raise httpx2.ReadTimeout('uncertain delivery', request=request)
     async def run() -> None:
-        application = ApplicationService(FunctionModel(respond))
+        application = CaseService(FunctionModel(respond))
         async def handle(turn: OwnerTurn) -> str:
             observed.append(turn)
             return await application.run(turn)
@@ -44,7 +45,7 @@ def test_failed_reply_preserves_committed_case_and_normalized_replay(tmp_path: P
             with pytest.raises(TelegramError):
                 await transport.poll_once()
         assert observed == [OwnerTurn('bot:7', 'bot:7', 'telegram:42', 'Create a case called Kettle')]
-        replay = await ApplicationService(FunctionModel(respond)).run(observed[0])
+        replay = await CaseService(FunctionModel(respond)).run(observed[0])
         assert 'already processed' in replay
         assert len(await application.store.list_cases('bot:7')) == 1
         assert PollingState(tmp_path).offset() == 43
@@ -65,7 +66,7 @@ def test_simultaneous_same_delivery_creates_once_and_stale_selection_cannot_writ
             await release.wait()
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
                 {'action': 'create', 'label': 'Kettle', 'intent_quote': 'Create a case'})])
-        service = ApplicationService(FunctionModel(respond))
+        service = CaseService(FunctionModel(respond))
         turn = OwnerTurn('owner', 'chat', 'one-delivery', 'Create a case called Kettle')
         tasks = [asyncio.create_task(service.run(turn)) for _ in range(2)]
         await asyncio.wait_for(both_started.wait(), 5)
@@ -81,13 +82,13 @@ def test_simultaneous_same_delivery_creates_once_and_stale_selection_cannot_writ
             await finish.wait()
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
                 {'action': 'update', 'facts': [{'key': 'issue', 'value': 'broken', 'quote': 'broken'}]})])
-        pending = asyncio.create_task(ApplicationService(FunctionModel(update)).run(
+        pending = asyncio.create_task(CaseService(FunctionModel(update)).run(
             OwnerTurn('owner', 'chat', 'update', 'It arrived broken')))
         await started.wait()
         def leave(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
                 {'action': 'leave', 'intent_quote': 'Return to general research'})])
-        await ApplicationService(FunctionModel(leave)).run(OwnerTurn('owner', 'chat', 'leave', 'Return to general research'))
+        await CaseService(FunctionModel(leave)).run(OwnerTurn('owner', 'chat', 'leave', 'Return to general research'))
         finish.set()
         assert 'selection changed' in (await pending).lower()
         case = await service.store.get_case('owner', (await service.store.list_cases('owner'))[0].id)
@@ -104,7 +105,7 @@ def test_production_public_handoff_releases_real_subscription_lock(tmp_path: Pat
         payload = json.loads(request.content)
         if requests == 1:
             output = [{'type': 'function_call', 'id': 'fc_1', 'call_id': 'call_1',
-                       'name': payload['tools'][0]['name'], 'arguments': json.dumps({'action': 'public'})}]
+                       'name': payload['tools'][0]['name'], 'arguments': json.dumps({'specialist': 'research'})}]
         else:
             output = [{'type': 'message', 'id': 'msg_2', 'role': 'assistant', 'status': 'completed',
                        'content': [{'type': 'output_text', 'text': 'Public answer from subscription', 'annotations': []}]}]
@@ -162,7 +163,7 @@ def test_failed_delivery_preserves_draft_and_replay_does_not_regenerate(tmp_path
         raise httpx2.ReadTimeout('uncertain delivery', request=request)
     async def run() -> None:
         nonlocal drafting
-        application = ApplicationService(FunctionModel(respond))
+        application = CaseService(FunctionModel(respond))
         await application.run(OwnerTurn('bot:7', 'bot:7', 'create', 'Create a case called Kettle. It is broken.'))
         case_id = (await application.store.list_cases('bot:7'))[0].id
         drafting = True
@@ -171,7 +172,7 @@ def test_failed_delivery_preserves_draft_and_replay_does_not_regenerate(tmp_path
                                         turn_handler=application.run, identity='bot:7')
             with pytest.raises(TelegramError):
                 await transport.poll_once()
-        restarted = ApplicationService(FunctionModel(respond))
+        restarted = CaseService(FunctionModel(respond))
         assert 'version 1' in await restarted.run(OwnerTurn('bot:7', 'bot:7', 'telegram:43', 'Draft a refund email'))
         assert len(await restarted.store.list_drafts('bot:7', case_id)) == 1
         assert generations == 1 and PollingState(tmp_path).offset() == 44

@@ -18,7 +18,7 @@ from gmail.scheduler import MonitoringScheduler
 from telegram_bot.runtime import ApplicationRuntime
 from conversations.service import ConversationService
 from research.service import ResearchService
-from grievances.service import SubscriptionApplicationService
+from core.runtime import SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
 from telegram_bot.configuration import TelegramConfiguration
 from telegram_bot.client import TelegramClient

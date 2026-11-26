@@ -25,7 +25,7 @@ from gmail.monitoring import MonitoringWorker
 from gmail.planner import GmailQueryPlanner
 from gmail.reply_evaluation import GmailReplyExperiment
 from gmail.service import GmailService
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from subscriptions.service import SubscriptionService
 
 
@@ -61,7 +61,7 @@ class GmailReminderExperiment(GmailReplyExperiment):
                 @asynccontextmanager
                 async def model_session() -> AsyncIterator[Model]:
                     yield model
-                app = ApplicationService(model, correspondence=Correspondence(lambda: nullcontext(mailbox), GmailQueryPlanner(model)))
+                app = CaseService(model, correspondence=Correspondence(lambda: nullcontext(mailbox), GmailQueryPlanner(model)))
                 await self.turn(app, owner, 'consent', 'I agree to email processing')
                 setup = await self.turn(app, owner, 'setup', 'Help me get my Lumen refund. Check my emails for the correspondence.')
                 automatic = await CaseMonitor.objects.filter(mailbox_record__case__owner_id=owner, active=True).aexists()

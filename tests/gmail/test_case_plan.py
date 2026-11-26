@@ -7,7 +7,7 @@ from pydantic_ai.models.function import FunctionModel, AgentInfo
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 
 from core.turns import OwnerTurn, PreparedReply
-from grievances.service import ApplicationService
+from grievances.service import CaseService
 from preferences.models import SavedPreference
 from tests.telegram_bot.test_gmail import AssistanceHarness
 
@@ -24,7 +24,7 @@ def test_new_case_plan_precedes_gmail_search(tmp_path: Path) -> None:
     async def scenario() -> None:
         await harness.send('I agree to email processing')
         harness.text = 'Help me get my Kettle refund'
-        app = ApplicationService(FunctionModel(harness.model), correspondence=harness.correspondence, progress=progress)
+        app = CaseService(FunctionModel(harness.model), correspondence=harness.correspondence, progress=progress)
         answer = await app.run(OwnerTurn('test:7', 'test:7', 'new-case', harness.text))
         assert len(messages) == 1
         assert 'Plan for Kettle' in messages[0]

@@ -18,7 +18,8 @@ from core.tracing import tracing
 from core.turns import OwnerTurn
 from grievances.cleanup import CaseTraceCleanup
 from grievances.models import CaseTrace
-from grievances.service import ApplicationService
+from core.service import ApplicationService
+from grievances.service import CaseService
 
 
 class RemoteTraceExporter(InMemorySpanExporter):
@@ -57,7 +58,7 @@ def test_application_forgetting_does_not_export_captured_request_after_cleanup(a
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if info.output_tools:
-            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': 'memory'})])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'conversation'})])
         return ModelResponse(parts=[ToolCallPart('forget_conversation', {})])
 
     async def run() -> None:
@@ -111,7 +112,7 @@ def test_case_capture_registers_directory_and_new_cases_for_deletion() -> None:
 
     async def run() -> None:
         async with httpx2.AsyncClient(base_url='https://trace.invalid', transport=httpx2.MockTransport(exporter.respond)) as client:
-            app = ApplicationService(FunctionModel(respond), trace_cleanup=CaseTraceCleanup(client))
+            app = CaseService(FunctionModel(respond), trace_cleanup=CaseTraceCleanup(client))
             for delivery, message in [('a', 'Create a case Alpha'), ('b', 'Create a case Beta'), ('c', 'Which case?')]:
                 await app.run(OwnerTurn('trace-owner', 'chat', delivery, message))
             cases = await app.store.list_cases('trace-owner')

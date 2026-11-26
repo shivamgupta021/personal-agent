@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, UserPromptPart
+from pydantic_ai.messages import TextPart, ModelMessage, ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
@@ -18,7 +18,8 @@ from gmail.errors import GmailError, GmailDisconnected
 from gmail.factory import GmailFactory
 from gmail.onboarding import GmailOnboarding, ConnectionAttempt
 from gmail.service import GmailService
-from grievances.service import SubscriptionApplicationService
+from tests.routing import delegated
+from core.runtime import SubscriptionApplicationService
 from subscriptions.service import SubscriptionService
 from tests.telegram_bot.test_gmail import DraftHarness
 from gmail.constants import SCOPES
@@ -63,7 +64,7 @@ def test_connection_runs_after_releasing_model_session(tmp_path: Path, monkeypat
         nonlocal leased
         leased = True
         try:
-            yield FunctionModel(respond)
+            yield FunctionModel(delegated(respond))
         finally:
             leased = False
 
@@ -105,7 +106,7 @@ def test_missing_connection_saves_goal_without_planning_and_resumes_after_consen
 
     @asynccontextmanager
     async def model(self: SubscriptionService, name: str = '') -> AsyncIterator[Model]:
-        yield FunctionModel(respond)
+        yield FunctionModel(delegated(respond))
 
     def require_connection() -> None:
         if connection_unavailable:
@@ -170,7 +171,7 @@ def test_readonly_draft_request_is_saved_for_consent_resume(tmp_path: Path) -> N
 
         @asynccontextmanager
         async def model(self: SubscriptionService, name: str = '') -> AsyncIterator[Model]:
-            yield FunctionModel(respond)
+            yield FunctionModel(delegated(respond))
 
         async def connect(turn: OwnerTurn, email: str, compose: bool) -> ConnectionAttempt:
             assert compose and email == 'owner@example.com'
@@ -206,7 +207,11 @@ def test_pending_consent_does_not_block_other_messages(tmp_path: Path, monkeypat
     delivered: list[str] = []
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if not info.output_tools:
+            return ModelResponse(parts=[TextPart('323')])
         data = json.loads(str(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart))))
+        if 'specialist' in info.output_tools[0].parameters_json_schema.get('properties', {}):
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'grievance' if data['message'].startswith('Connect') else 'conversation'})])
         request = data['current_request']
         result = ({'action': 'gmail_connect', 'gmail_account': 'owner@example.com', 'intent_quote': request}
             if request.startswith('Connect') else {'action': 'conversation', 'conversation_reply': '323'})

@@ -12,7 +12,8 @@ from conversations.models import ConversationRecord
 from grievances.models import GrievanceCase, CaseSelection, CaseFactRevision
 
 from core.turns import OwnerTurn
-from grievances.service import SubscriptionApplicationService, ApplicationService
+from core.service import ApplicationService
+from core.runtime import SubscriptionApplicationService
 from preferences.models import SavedPreference
 from subscriptions.service import SubscriptionService
 
@@ -59,8 +60,10 @@ def test_unfamiliar_and_mixed_requests_keep_routing(tmp_path: Path, monkeypatch:
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         nonlocal calls
         calls += 1
-        assert calls == 1, 'Preference inspection should not invoke a second agent'
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': route})])
+        if calls == 1:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist':'preferences'})])
+        assert calls == 2
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': 'list' if route == 'list_preferences' else 'clarify'})])
 
     @asynccontextmanager
     async def model(self: SubscriptionService, name: str = '') -> AsyncIterator[Model]:
@@ -72,7 +75,7 @@ def test_unfamiliar_and_mixed_requests_keep_routing(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(SubscriptionService, 'model', model)
     app = SubscriptionApplicationService(SubscriptionService(tmp_path), public)
     answer = asyncio.run(app.run(OwnerTurn('owner', 'owner', 'fallback', message)))
-    assert calls == 1
+    assert calls == 2
     if route == 'list_preferences':
         assert answer == 'No saved preferences.'
     assert not SavedPreference.objects.exists()
@@ -84,7 +87,7 @@ def test_router_cannot_copy_case_identifiers_into_preference_history(tmp_path: P
     CaseFactRevision.objects.create(case=case, revision=1, facts={'order_reference': 'PRIVATE-123'})
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'action': 'list_preferences'})])
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist': 'preferences'})])
 
     @asynccontextmanager
     async def model(self: SubscriptionService, name: str = '') -> AsyncIterator[Model]:
@@ -96,7 +99,7 @@ def test_router_cannot_copy_case_identifiers_into_preference_history(tmp_path: P
     monkeypatch.setattr(SubscriptionService, 'model', model)
     app = SubscriptionApplicationService(SubscriptionService(tmp_path), public)
     answer = asyncio.run(app.run(OwnerTurn('owner', 'owner', 'private', 'Show my saved preferences for order PRIVATE-123')))
-    assert 'Case material cannot become general memory' in answer
+    assert 'includes case details' in answer
     assert not any('PRIVATE-123' in str(r.history) for r in ConversationRecord.objects.all())
 
 
@@ -107,7 +110,7 @@ def test_explicit_preference_save_routes_directly_to_authorization() -> None:
         nonlocal calls
         calls += 1
         if calls == 1:
-            result = {'action': 'preference'}
+            result = {'specialist': 'preferences'}
         else:
             assert calls == 2, 'No intermediary memory model for an explicit preference operation'
             assert 'consent_quote' in str(info.output_tools[0].parameters_json_schema)
