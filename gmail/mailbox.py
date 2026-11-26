@@ -173,6 +173,29 @@ class Mailbox:
             except (ValueError, TypeError, GmailError):
                 raise DraftOutcomeUnknown('Google returned an unclear creation result. Check Gmail Drafts before retrying.') from None
 
+    def send_message(self, draft: DraftEnvelope) -> str:
+        """Send exactly the approved snapshot; callers own durable authorization/handoff."""
+        with self.connection.connected() as connection:
+            self.connection.validate(connection.credentials, require_compose=True)
+            if connection.email.casefold() != draft.mailbox.casefold():
+                raise GmailError('The connected account changed; sending stopped.')
+            message = EmailMessage(policy=SMTP)
+            message['From'], message['To'], message['Subject'] = draft.mailbox, draft.recipient, draft.subject
+            message['Message-ID'] = '<' + draft.marker + '@personal-agent.local>'
+            if draft.thread_id:
+                self._identifier(draft.thread_id)
+                if not draft.reply_id:
+                    raise GmailError('Reply headers are missing; sending stopped.')
+                message['In-Reply-To'] = draft.reply_id
+                message['References'] = (draft.references + ' ' + draft.reply_id).strip()
+            message.set_content(draft.body)
+            payload = {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode(), 'threadId': draft.thread_id}
+            response = self.http.post(constants.API_URL + '/messages/send', json=payload,
+                headers={'Authorization': 'Bearer ' + str(connection.credentials.token)}, follow_redirects=False)
+            if response.status_code != 200:
+                raise GmailError('Google did not confirm sending. Check Sent Mail before taking another action.')
+            return self._identifier(response.json().get('id'))
+
     def find_export(self, mailbox: str, marker: str) -> DraftReference | None:
         """Recover only a positively matched draft; absence never authorizes retry."""
         with self.connection.connected() as connection:

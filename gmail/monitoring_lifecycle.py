@@ -2,7 +2,8 @@
 from django.db import transaction
 from django.db.models import F, QuerySet
 
-from gmail.models import CaseMonitor, CaseReminder, MonitorNotification
+from gmail.models import CaseMonitor, CaseReminder, MonitorNotification, CaseFollowup
+from gmail.followup_constants import FollowupStatus
 from gmail.reminder_constants import ReminderStatus
 
 
@@ -11,6 +12,7 @@ class MonitoringLifecycle:
     def stop(monitors: QuerySet[CaseMonitor], reason: str) -> None:
         with transaction.atomic():
             identifiers = list(monitors.select_for_update().values_list('pk', flat=True))
+            CaseFollowup.objects.filter(monitor_id__in=identifiers, status__in=[FollowupStatus.PROPOSED, FollowupStatus.ACTIVE, FollowupStatus.PAUSED]).update(status=FollowupStatus.STOPPED, reason=reason)
             CaseReminder.objects.filter(monitor_id__in=identifiers,
                 status__in=[ReminderStatus.PENDING, ReminderStatus.QUEUED, ReminderStatus.CLARIFY]).update(
                     status=ReminderStatus.CANCELLED, revision=F('revision') + 1, reason=reason)

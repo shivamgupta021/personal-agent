@@ -191,8 +191,11 @@ class MonitoringStore:
             monitor.save()
             ReminderStore.assess(monitor, result, now)
             if text:
-                MonitorNotification.objects.create(monitor=monitor, generation=job.generation,
-                    text=text[:MAX_NOTIFICATION_CHARS])
+                # Persist every character before advancing the transaction's seen state.
+                # Splitting a notification must not silently discard later findings.
+                for offset in range(0, len(text), MAX_NOTIFICATION_CHARS):
+                    MonitorNotification.objects.create(monitor=monitor, generation=job.generation,
+                        text=text[offset:offset + MAX_NOTIFICATION_CHARS])
 
     @sync_to_async
     def queue_due_reviews(self, owner_id: str, now: datetime) -> None:

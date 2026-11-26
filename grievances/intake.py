@@ -17,7 +17,7 @@ from conversations.store import ConversationStore
 from conversations.constants import MAX_INLINE_CONTEXT_BYTES
 from conversations.direct import DirectConversation
 from core.turns import OwnerTurn
-from gmail.models import CaseMailbox, EmailConsent, CaseReminder
+from gmail.models import CaseMailbox, EmailConsent, CaseReminder, CaseFollowup
 from grievances import constants
 from grievances.correspondence import CompanyReplyParser, ParsedCompanyReply
 from grievances.policy_store import PolicyStore
@@ -149,6 +149,7 @@ class CaseIntake:
         preferences = await PreferenceStore().list(turn.owner_id)
         pending = await CaseMailbox.objects.filter(case_id=current.id).afirst() if current else None
         reminder = await CaseReminder.objects.filter(monitor__mailbox_record__case_id=current.id).afirst() if current else None
+        followup = await CaseFollowup.objects.filter(case_id=current.id).afirst() if current else None
         saved_conversation = await ConversationStore().context(turn.owner_id)
         conversation: ConversationContext | None = saved_conversation
         dialogue = DirectConversation.dialogue(saved_conversation)
@@ -156,6 +157,7 @@ class CaseIntake:
         if len(encoded_history) > MAX_INLINE_CONTEXT_BYTES or pending and pending.pending_question:
             conversation = None
         directory: dict[str, object] = {
+            'automatic_sending_plan': {'status': followup.status, 'draft_version': followup.draft_version, 'recipient': followup.envelope.get('recipient'), 'interval_minutes': followup.interval_minutes, 'max_followups': followup.max_followups} if followup else None,
             'conversation_history': dialogue if conversation is not None else None,
             'reminder': {'kind': reminder.kind, 'draft_version': reminder.draft_version, 'status': reminder.status, 'deadline': reminder.due_at.isoformat(), 'question': reminder.reason} if reminder else None,
             'has_uploaded_attachments': bool(current and await CaseMessage.objects.filter(case_id=current.id, role='attachment').aexists()),
