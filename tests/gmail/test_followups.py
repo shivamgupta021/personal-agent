@@ -302,10 +302,28 @@ def test_repeated_approval_reports_active_plan_without_duplicate_send() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_natural_withdrawal_closes_case_and_stops_all_jobs() -> None:
+def test_negated_closure_cannot_be_authorized_by_a_shortened_model_quote() -> None:
     h = FollowupHarness()
     h.approve()
-    request = 'Stop automatic sending and close Demo Store as withdrawn, not refunded.'
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+            {'action': 'close_without_resolution', 'intent_quote': 'close it without a refund'})])
+    h.app = CaseService(FunctionModel(respond), correspondence=Correspondence(lambda: nullcontext(h.mailbox)))
+    answer = h.say('Do not close it without a refund.')
+    h.case.refresh_from_db()
+    assert h.case.status == 'open' and 'Nothing was changed' in answer
+    assert CaseMonitor.objects.get().active
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('message', [
+    'Stop automatic sending and close Demo Store as withdrawn, not refunded.',
+    'I’m done with this fictional case. Close it without a refund and stop all reminders and follow-ups.',
+])
+def test_natural_withdrawal_closes_case_and_stops_all_jobs(message: str) -> None:
+    h = FollowupHarness()
+    h.approve()
+    request = message
     original = h.respond
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
