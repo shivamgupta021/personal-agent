@@ -272,3 +272,29 @@ def test_independent_public_question_preserves_selected_case_without_exporting_i
         await ApplicationService(FunctionModel(respond), research).run(OwnerTurn('owner', 'chat', 'private', 'Search for PRIVATE-ORDER'))
         assert len(public) == 1
     asyncio.run(run())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_natural_owner_correction_updates_case_fact() -> None:
+    proposed: dict[str, object] = {}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, proposed)])
+
+    async def scenario() -> None:
+        service = CaseService(FunctionModel(respond))
+        proposed.update(action='create', label='Willow', intent_quote='Create Willow',
+                        facts=[{'key': 'purchase_date', 'value': '20 November', 'quote': '20 November'}])
+        await service.run(OwnerTurn('natural-owner', 'chat', 'create', 'Create Willow. Purchase date: 20 November.'))
+        proposed.clear()
+        proposed.update(action='update', correction_quote='Actually, the purchase date was 21 November.',
+                        facts=[{'key': 'purchase_date', 'value': '21 November',
+                                'quote': 'Actually, the purchase date was 21 November.'}])
+        reply = await service.run(OwnerTurn('natural-owner', 'chat', 'correct',
+                                            'Actually, the purchase date was 21 November.'))
+        assert reply == 'Updated purchase date: **21 November**.'
+        case = (await service.store.list_cases('natural-owner'))[0]
+        current = await service.store.get_case('natural-owner', case.id)
+        assert current and current.facts['purchase_date'] == '21 November'
+
+    asyncio.run(scenario())

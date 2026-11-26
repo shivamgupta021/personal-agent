@@ -170,7 +170,7 @@ class CaseIntake:
                 or len(' '.join(action.label.casefold().split())) > 120):
             return 'Please supply a short label for the new case. Nothing changed.'
         if action.correction_quote and (action.correction_quote not in request or not re.search(
-                r'\b(correct(?:ion)?|replace|change|update|amend)\b', action.correction_quote, re.IGNORECASE)):
+                r'\b(correct(?:ion)?|replace|change|update|amend|actually|i meant)\b', action.correction_quote, re.IGNORECASE)):
             return 'Please explicitly state the correction. Nothing changed.'
         if (action.action in SELECTED_ACTIONS or action.action.startswith('gmail_')) and not action.action.startswith('gmail_reminder_') and action.case_id and action.case_id != selection.case_id:
             return 'Please explicitly select the intended case first. Nothing changed.'
