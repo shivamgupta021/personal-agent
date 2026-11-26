@@ -12,13 +12,15 @@ class CasePlan:
     def __init__(self, deliver: Callable[[PreparedReply], Awaitable[None]] | None = None) -> None:
         self.deliver = deliver
 
+    @staticmethod
+    def text(case: CaseView) -> str:
+        return (f'**Plan for {case.label}**\n'
+            '1. Check your emails and receipts.\n'
+            '2. Prepare a short refund request for your review.\n'
+            '3. Send and follow up only after your approval.')
+
     async def present(self, turn: OwnerTurn, case: CaseView, epoch: int) -> str:
-        remedy = case.facts.get('requested_remedy', 'a suitable resolution')
-        text = (f'Here’s the plan for {case.label}:\n'
-            f'1. Review your details and relevant emails to understand the request for {remedy}.\n'
-            '2. Identify what is missing and propose the next step.\n'
-            '3. Prepare a short Gmail draft when you ask, then get your approval before sending or scheduling follow-ups.\n'
-            'I’ll ask for Gmail access if needed and pause when a reply needs your decision.')
+        text = self.text(case)
         if self.deliver is None:
             return text
 

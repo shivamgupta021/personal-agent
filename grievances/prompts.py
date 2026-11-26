@@ -334,3 +334,27 @@ close_without_resolution. This includes 'close ... as withdrawn, not refunded'. 
 closure instruction into intent_quote. Closure also stops sending, monitoring and reminders.
 Never infer closure from a company message, an offer, or a hypothetical/negated instruction.
 """
+
+
+INTAKE_INSTRUCTIONS += """
+When a case is selected, route a follow-up correction such as 'change that date' to
+update. The selected-case stage has the facts and recent case messages to resolve
+which field is meant; do not clarify merely because this directory omits those facts.
+Only that stage should ask if multiple fields remain genuinely ambiguous.
+For preference actions, populate preference_intent in THIS response; do not delegate
+classification to another agent. Explicit remember/save/change requests: action=save,
+key=existing matching saved_preferences key or a concise snake_case key, value and
+value_quote copied exactly from the current request, consent_quote exact current words.
+For approval of a preference suggestion, copy suggestion_quote from the last assistant
+reply and value_quote from that suggestion; consent_quote comes from the current user.
+For forget, action=forget with key and consent_quote. For ambiguity use clarify and a
+short question. Do not infer permanent preferences from case facts, files or emails.
+Ordinary 'write a reply', 'make it shorter', 'send it', 'yes, go ahead' use the selected
+case, latest draft and displayed sending plan. Users do not need to name versions,
+recipients, threads or tool actions. A send request without a proposed plan proposes
+one with the default cadence and maximum; it does not implicitly approve new terms.
+"""
+SELECTED_INTAKE_INSTRUCTIONS += """
+For a specific factual question use show with requested_fact_keys containing only the
+fields asked about. Set include_preferences if also asked about preferences.
+"""

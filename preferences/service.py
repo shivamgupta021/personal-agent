@@ -3,9 +3,7 @@
 import asyncio
 from functools import partial
 import json
-from typing import Literal
 
-from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models import Model
@@ -16,21 +14,12 @@ from pydantic_ai.usage import UsageLimits
 from conversations.budget import ConversationBudget
 from conversations.facts import ConversationEditRejected, EditIntent, EditResult, FactCleanup, FactEditor
 from preferences import constants
+from preferences.schema import PreferenceIntent
 from preferences.prompts import PREFERENCE_AUTHORIZATION, PREFERENCE_CONTEXT
 from preferences.store import Preference, PreferenceStore
 from preferences.inspection import PreferenceInspection
 from research.constants import MAX_MODEL_REQUESTS
 from core.tracing import tracing
-
-
-class PreferenceIntent(BaseModel):
-    action: Literal['save', 'list', 'forget', 'clarify', 'none']
-    key: str = Field(default='', max_length=constants.KEY_CHARS, pattern=r'^[a-z0-9_]*$')
-    value: str = Field(default='', max_length=constants.VALUE_CHARS)
-    consent_quote: str = Field(default='', max_length=constants.SOURCE_CHARS)
-    value_quote: str = Field(default='', max_length=constants.VALUE_CHARS)
-    suggestion_quote: str = Field(default='', max_length=constants.SOURCE_CHARS)
-    question: str = Field(default='', max_length=constants.VALUE_CHARS)
 
 
 class PreferenceReply(Exception):
@@ -74,6 +63,10 @@ class PreferenceService:
                 }), usage=ctx.usage, usage_limits=UsageLimits(request_limit=MAX_MODEL_REQUESTS))).output
         except Exception as error:
             raise ConversationEditRejected('Preference authorization failed. Nothing changed; please try again.') from error
+        return await self.execute_intent(ctx, intent)
+
+    async def execute_intent(self, ctx: RunContext[None], intent: PreferenceIntent) -> EditResult:
+        """Execute the router's proposal using the same source and consent checks."""
         if intent.action in ('none', 'clarify'):
             return EditResult('clarify', intent.question or 'Should this be a lasting saved preference, or only for this task?')
         if intent.action == 'list':

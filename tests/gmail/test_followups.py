@@ -116,7 +116,7 @@ class FollowupHarness:
         asyncio.run(self.worker.tick('bot:123'))
 
     def approve(self) -> None:
-        assert 'Approve this sending plan' in self.say('Prepare automatic sending')
+        assert 'Approve & send' in self.say('Prepare automatic sending')
         assert 'approved' in self.say('Approve this sending plan')
         CaseFollowup.objects.filter(case=self.case).update(next_due=self.now)
 
@@ -247,7 +247,7 @@ def test_replacing_an_unsent_proposal_does_not_erase_sent_history() -> None:
     original = h.mailbox.envelope
     h.mailbox.envelope = DraftEnvelope(original.mailbox, original.recipient, original.subject,
         'A different request for review.', original.thread_id, original.reply_id)
-    assert 'Approve this sending plan' in h.say('Prepare automatic sending')
+    assert 'Approve & send' in h.say('Prepare automatic sending')
     h.mailbox.envelope = original
     assert 'already been sent' in h.say('Prepare automatic sending')
     assert FollowupSend.objects.count() == 1

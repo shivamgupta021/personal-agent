@@ -4,8 +4,7 @@ CAPABILITY_REQUESTS = frozenset((
     'hi, what can you help me with', 'hello, what can you help me with',
 ))
 CAPABILITY_DESCRIPTION = (
-    'I can research questions, help with refund or grievance cases, find relevant Gmail emails, '
-    'and prepare unsent drafts for you to review in Gmail. I can also check for replies, '
-    'set reminders, and remember preferences you ask me to save. '
-    'Tell me what you need help with; I’ll ask for Gmail access when needed. Sending requires your approval of a case-specific plan, including follow-up limits.'
+    'I help with refunds and complaints: find Gmail emails, draft replies, and follow up '
+    'with your approval. I can also research questions and remember preferences.\n\n'
+    'Tell me what happened; I’ll guide you from there.'
 )

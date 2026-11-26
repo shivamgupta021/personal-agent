@@ -3,6 +3,8 @@
 from typing import Literal
 from datetime import datetime
 
+from preferences.schema import PreferenceIntent
+
 from pydantic import BaseModel, ConfigDict, Field
 from conversations.constants import MAX_INLINE_REPLY_CHARS
 from gmail.followup_constants import DEFAULT_INTERVAL_MINUTES, DEFAULT_MAX_FOLLOWUPS, MAX_FOLLOWUPS, MAX_INTERVAL_MINUTES
@@ -27,6 +29,8 @@ class IntakeAction(BaseModel):
         description='Use deleted_details only when the owner asks about retrieving details of a deleted case; this selects a fixed explanation, not a deletion action.')
     reminder_kind: Literal['no_response', 'draft_review'] | None = Field(default=None, description='Set for a new purpose; leave null when moving an existing reminder.')
     conversation_reply: str = Field(default='', max_length=MAX_INLINE_REPLY_CHARS, description='Optional final answer for ordinary conversation only; leave empty when recall, compaction or memory tools are needed.')
+    preference_intent: PreferenceIntent | None = None
+    requested_fact_keys: list[FactKey] = Field(default_factory=list, max_length=16)
     include_preferences: bool = Field(default=False, description='For a read-only case show request that also explicitly asks about saved preferences.')
     followup_interval_minutes: int = Field(default=DEFAULT_INTERVAL_MINUTES, ge=1, le=MAX_INTERVAL_MINUTES)
     followup_maximum: int = Field(default=DEFAULT_MAX_FOLLOWUPS, ge=1, le=MAX_FOLLOWUPS)

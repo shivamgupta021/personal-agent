@@ -88,7 +88,7 @@ def test_conflicting_amount_requires_explicit_correction_and_preserves_history()
         assert current and current.facts['amount_paid'] == '2,400' and current.revision == 1
         proposed['correction_quote'] = 'Correction: the amount was 2,700'
         turn = OwnerTurn('a', 'a', '3', 'Correction: the amount was 2,700')
-        assert 'saved' in (await service.run(turn)).lower()
+        assert await service.run(turn) == 'Updated amount paid: **2,700**.'
         await ApplicationService(FunctionModel(respond)).run(turn)
         current = await service.store.get_case('a', case_id)
         assert current and current.facts['amount_paid'] == '2,700' and current.revision == 2
@@ -172,7 +172,7 @@ def test_private_trace_payload_exclusion_with_global_content_capture(failure: st
             assert spans
             serialized = '\n'.join(span.to_json() for span in spans)
             assert secret not in serialized
-            assert 'case.intake' in serialized
+            assert 'application.route' in serialized
     finally:
         tracing.shutdown()
 

@@ -219,11 +219,14 @@ class CaseStore:
                 reply = 'General research mode selected. Saved cases are preserved. Send a public research question separately.'
             elif action.action == 'list':
                 labels = GrievanceCase.objects.filter(owner_id=turn.owner_id).order_by('created_at')
-                reply = 'Your cases:\n' + '\n'.join(f'{row.label} [{row.pk}]' for row in labels) if labels.exists() else 'No saved cases.'
+                reply = 'Your cases:\n' + '\n'.join(f'• {row.label}' for row in labels) if labels.exists() else 'No saved cases.'
                 case = None
             elif action.action in ('update', 'show') and case is not None:
                 facts = dict(CaseFactRevision.objects.get(case=case, revision=case.revision).facts)
-                conflicts = [fact.key for fact in action.facts if fact.key in facts and facts[fact.key] != fact.value]
+                # A requested remedy is the owner's current goal, not a historical
+                # claim. Asking for a different remedy updates it directly.
+                conflicts = [fact.key for fact in action.facts if fact.key != 'requested_remedy'
+                             and fact.key in facts and facts[fact.key] != fact.value]
                 if conflicts and not action.correction_quote:
                     reply = 'Please confirm an explicit correction for: ' + ', '.join(conflicts) + '. Current facts are unchanged.'
                     outcome = 'conflict'
@@ -231,7 +234,8 @@ class CaseStore:
                     if action.action == 'update' and any(facts.get(f.key) != f.value for f in action.facts):
                         self._revise(case, facts, action, 'correction' if conflicts else 'intake')
                         outcome = 'saved'
-                    reply = ('Facts saved. ' if outcome == 'saved' else '') + self.describe(case)
+                    reply = (('Updated ' + ', '.join(f'{fact.key.replace("_", " ")}: **{fact.value}**' for fact in action.facts) + '.')
+                             if outcome == 'saved' else self.describe(case))
             elif action.action == 'clarify' and action.clarification_reason == 'deleted_details':
                 case = None
                 reply = ("I can't retrieve deleted case details. You can select a remaining saved case "
@@ -255,7 +259,7 @@ class CaseStore:
     def describe(self, case: GrievanceCase) -> str:
         facts = CaseFactRevision.objects.get(case=case, revision=case.revision).facts
         missing = [field.replace('_', ' ') for field in MATERIAL_FIELDS if field not in facts]
-        body = f'{case.label} [{case.pk}] — {case.status}.\n' + '\n'.join(f'{key.replace("_", " ")}: {value}' for key, value in facts.items())
+        body = f'**{case.label}** — {case.status.replace("_", " ")}.\n' + '\n'.join(f'{key.replace("_", " ")}: {value}' for key, value in facts.items())
         if missing:
             body += '\nPlease supply missing details when known: ' + ', '.join(missing) + '.'
         return body

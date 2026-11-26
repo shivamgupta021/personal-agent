@@ -34,12 +34,18 @@ class TelegramService:
             # Persist before any work: a crash or uncertain send never replays research.
             self.state.advance(update_id + 1)
             offset = update_id + 1
-            message = update.get('message', {})
+            callback = update.get('callback_query', {})
+            message = callback.get('message', {}) if callback else update.get('message', {})
             chat = message.get('chat', {})
-            if (message.get('from', {}).get('id') != self.owner_id
+            if ((callback.get('from', {}) if callback else message.get('from', {})).get('id') != self.owner_id
                     or chat.get('type') != 'private' or chat.get('id') != self.owner_id):
                 continue
-            question = message.get('text') or message.get('caption')
+            if callback:
+                await self.client.request('answerCallbackQuery', {'callback_query_id': callback['id']})
+            question = (next((button.get('text', 'Button selected')
+                for row in message.get('reply_markup', {}).get('inline_keyboard', [])
+                for button in row if button.get('callback_data') == callback.get('data')), 'Button selected')
+                if callback else message.get('text') or message.get('caption'))
             file = message.get('document')
             photos = message.get('photo', [])
             if not file and photos:
@@ -47,7 +53,7 @@ class TelegramService:
             if not isinstance(question, str) or not question.strip():
                 if not file:
                     continue
-                question = 'Read this attachment and summarize the important information.'
+                question = 'Here is my receipt or supporting document. Add it to the current case and tell me the key details.'
             if question.startswith('/'):
                 await self.client.send(self.owner_id,
                     'Create a named grievance case, list or select a case, or send a public research question. '
@@ -61,7 +67,7 @@ class TelegramService:
                     uploads = (await self.client.download(file['file_id'], file.get('file_name', 'attachment'),
                         file.get('mime_type', 'application/octet-stream'), file.get('file_size', 0)),)
                 answer = await self.turn_handler(OwnerTurn(self.identity, self.identity,
-                    f'telegram:{update_id}', question, uploads))
+                    f'telegram:{update_id}', question, uploads, callback.get('data', '')))
             except Exception as error:
                 logger.warning('Request failed; request will not be replayed')
                 answer = (str(error) if isinstance(error, TelegramError) else user_error_message(error)) + ' Please send your question again.'

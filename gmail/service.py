@@ -52,12 +52,13 @@ class GmailService:
 
     def connect(self, client_file: Path, expected_email: str, *, replace_account: bool = False, compose: bool = False) -> str:
         with self.operation():
-            if '@' not in expected_email or any(c.isspace() for c in expected_email):
+            if expected_email and ('@' not in expected_email or any(c.isspace() for c in expected_email)):
                 raise GmailError('Provide the expected Gmail address using --email.')
             try:
                 previous = self.store.load()
             except Exception:
                 raise GmailError('Existing Gmail credentials could not be read. Unlock Keychain and retry, or run gmail_disconnect before reconnecting.') from None
+            expected_email = expected_email or (previous.email if previous else '')
             if previous and previous.email.casefold() != expected_email.casefold() and not replace_account:
                 raise GmailError('A different mailbox is connected. Use --replace-account to change it explicitly.')
             credentials = self.client.authorize(client_file, expected_email, scopes=COMPOSE_SCOPES) if compose else self.client.authorize(client_file, expected_email)
@@ -66,7 +67,7 @@ class GmailService:
             if not compose and set(granted or ()) != set(SCOPES):
                 raise GmailError('Unexpected Gmail permissions; the previous connection was preserved. Request draft permission explicitly.')
             actual_email = self.client.profile(credentials)
-            if actual_email.casefold() != expected_email.casefold():
+            if expected_email and actual_email.casefold() != expected_email.casefold():
                 raise GmailError('The selected Google account does not match --email. The previous connection was preserved.')
             if previous and previous.email.casefold() != actual_email.casefold() and self.disable_monitoring:
                 self.disable_monitoring()

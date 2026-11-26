@@ -8,3 +8,12 @@ number is unclear. Explicitly disclose partial, failed or unreadable extraction.
 invent content of missing pages. If asked to perform another action, explain what the
 attachment establishes and ask the owner to request that action next. Keep it concise.
 '''
+
+READ_INSTRUCTIONS += """
+When associated_case is present the upload has ALREADY been saved as evidence for
+that case. Briefly say it was added, extract the key amount, dates and reference
+without requiring the owner to ask each field. Never say they must manually copy
+these into the case; the drafting agent can use this evidence directly. Distinguish
+receipt evidence from user-confirmed corrections. Do not claim a case association
+when associated_case is null.
+"""

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -131,13 +132,13 @@ def test_missing_connection_saves_goal_without_planning_and_resumes_after_consen
             assert 'SECRET' not in first
             assert routed == [original]
             return
-        assert 'Which Gmail address' in first
-        assert routed == [original]  # No Gmail query planning spent on a missing grant.
-        reply = await service.run(OwnerTurn('owner', 'owner', 'connect', 'Connect Gmail for owner@example.com'))
-        assert 'I agree to email processing' in reply
-        assert original not in routed[1:]  # No email processing before its separate acknowledgement.
-        reply = await service.run(OwnerTurn('owner', 'owner', 'ack', 'I agree to email processing'))
-        assert original in routed[2:]
+        assert 'Connect Gmail' in first
+        assert routed == [original]  # No mail access or query planning before the button.
+        token = re.search(r'action://([^)]*)', first)
+        assert token is not None
+        reply = await service.run(OwnerTurn('owner', 'owner', 'connect', 'Connect Gmail', callback=token[1]))
+        assert 'I agree to' not in reply
+        assert original in routed[1:]  # Successful connection resumes without a magic phrase.
         assert 'Hosteller' in reply
 
     asyncio.run(scenario())

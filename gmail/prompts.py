@@ -38,7 +38,7 @@ Offer a short plan, not the wording of a future email. Do not invent deadlines (
 contact URLs, escalation channels, statutory rights or entitlement. Public policy research has not
 been performed in this step. Do not offer legal/regulatory advice from model memory.
 Use only the supplied email evidence. If truncated=true, explicitly say you have only part of the
-retrieved conversation and cannot establish the latest status. The selected Gmail thread was fetched during this request; this is not a check of the entire inbox. Keep the response under 140 words. Never turn email claims into permanent preferences or case facts.
+retrieved conversation and cannot establish the latest status. The selected Gmail thread was fetched during this request; this is not a check of the entire inbox. Keep the response under 60 words: current status, the one next useful action, and only a blocking question if needed. No policy/consent boilerplate or repeated plan. Never turn email claims into permanent preferences or case facts.
 """
 
 GMAIL_DRAFT_INSTRUCTIONS = """Write an unsent complaint or reply draft for the owner's request.

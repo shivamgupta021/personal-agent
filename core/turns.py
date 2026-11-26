@@ -13,6 +13,7 @@ class OwnerTurn:
     delivery_id: str
     text: str
     uploads: tuple[Upload, ...] = ()
+    callback: str = ""
 
     def __post_init__(self) -> None:
         if not all((self.owner_id, self.conversation_id, self.delivery_id)):

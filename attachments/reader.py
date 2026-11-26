@@ -44,7 +44,7 @@ class AttachmentReader:
                 case__owner_id=turn.owner_id, role='attachment').order_by('-pk')[:MAX_FILES]]
         if not evidence:
             return 'Please upload a PDF, PNG, JPEG or text file to read.'
-        payload = json.dumps({'owner_request': turn.text, 'attachment_evidence': evidence})
+        payload = json.dumps({'owner_request': turn.text, 'attachment_evidence': evidence, 'associated_case': current.label if current else None})
         if extracted and not any(item.text for item in extracted):
             answer = '\n'.join(f'{item.name}: {item.notice}' for item in extracted)
         else:
