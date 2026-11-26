@@ -33,7 +33,7 @@ class AcceptanceFingerprint:
     @classmethod
     def current(cls) -> dict[str, str]:
         groups: dict[str, list[Path]] = {'runtime': [], 'prompts': [], 'fixtures': [], 'tests': []}
-        for directory in ('core', 'grievances', 'conversations', 'preferences', 'research', 'subscriptions', 'telegram_bot', 'config'):
+        for directory in ('core', 'grievances', 'gmail', 'attachments', 'conversations', 'preferences', 'research', 'subscriptions', 'telegram_bot', 'config'):
             for path in (cls.ROOT / directory).rglob('*.py'):
                 if 'evaluation' in str(path.relative_to(cls.ROOT)) or 'acceptance' in path.name or 'fixtures' in path.name or path.name.startswith('evaluate_'):
                     groups['fixtures'].append(path)
