@@ -571,9 +571,9 @@ def test_draft_request_creates_only_unsent_gmail_draft_and_handles_uncertainty(t
         else:
             assert 'Draft v1' in answer and 'ready for your review' in answer
             assert 'https://mail.google.com' not in answer
-            assert harness.reply_payloads[-1]['reply_markup'] == {'inline_keyboard': [[{
+            assert harness.reply_payloads[-1]['reply_markup']['inline_keyboard'][0] == [{
                 'text': 'Open in Gmail',
-                'url': 'https://mail.google.com/mail/?authuser=owner%40example.com#inbox?compose=abc123'}]]}
+                'url': 'https://mail.google.com/mail/?authuser=owner%40example.com#inbox?compose=abc123'}]
             await harness.send('Draft a firmer reply in Gmail')
             assert len(harness.created) == 2  # New version, never overwrite the previous Gmail draft.
     try:

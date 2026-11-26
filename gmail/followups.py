@@ -45,12 +45,14 @@ class FollowupService:
         self.store = FollowupStore()
 
     async def control(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
-                      action: IntakeAction, now: datetime) -> str:
+                      action: IntakeAction, now: datetime, expected_generation: int | None = None) -> str:
         if not action.intent_quote or action.intent_quote not in turn.text:
             return 'Please state the sending change in your own words.'
         approved_generation = None
         if action.action == 'gmail_followup_approve':
             policy = await CaseFollowup.objects.filter(case_id=current.id, status='proposed').afirst()
+            if policy is not None and expected_generation is not None and policy.generation != expected_generation:
+                return 'That sending plan has changed. Please review the latest plan before approving.'
             if policy is not None:
                 approved_generation = policy.generation
                 row = await DraftRevisions(self.mailbox).resolve(turn, selection, current,

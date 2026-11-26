@@ -45,7 +45,7 @@ class TelegramClient:
 
     async def updates(self, offset: int) -> list[dict[str, Any]]:
         result = await self.request('getUpdates', {
-            'offset': offset, 'limit': 1, 'timeout': POLL_TIMEOUT_SECONDS, 'allowed_updates': ['message'],
+            'offset': offset, 'limit': 1, 'timeout': POLL_TIMEOUT_SECONDS, 'allowed_updates': ['message', 'callback_query'],
         })
         if not isinstance(result, list):
             raise TelegramError('Telegram returned invalid updates.')
@@ -92,10 +92,10 @@ class TelegramClient:
                     chunk = chunk[:boundary + 1]
             if prepared and not await prepared.valid():
                 return
-            payload: dict[str, Any] = {'chat_id': chat_id, 'text': chunk}
+            payload: dict[str, Any] = {'chat_id': chat_id, **ReplyPresentation.formatted(chunk)}
             if len(chunk) == len(remaining) and presentation.buttons:
                 payload['reply_markup'] = {'inline_keyboard': [
-                    [{'text': label, 'url': url}] for label, url in presentation.buttons]}
+                    [{'text': label, **({'callback_data': url.removeprefix('action://')} if url.startswith('action://') else {'url': url})}] for label, url in presentation.buttons]}
             await self.request('sendMessage', payload)
             remaining = remaining[len(chunk):]
             if remaining:

@@ -8,6 +8,7 @@ import re
 
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, UsageLimitExceeded, RunCancelled
 from pydantic_ai.models import Model
+from pydantic_ai.usage import RunUsage
 
 from gmail.assistance import CaseAssistance
 from gmail.followups import FollowupService
@@ -22,6 +23,9 @@ from gmail.reply_checks import GmailReplyChecks
 from gmail.monitoring_store import MonitoringStore
 from gmail.reminder_store import ReminderStore
 from django.utils import timezone
+from core.actions import CaseAction
+from asgiref.sync import sync_to_async
+from gmail.errors import GmailDisconnected
 from core.errors import ReplySavedDraftFailed, user_error_message
 from core.turns import OwnerTurn, PreparedReply
 from grievances.ownership import CaseOwnership
@@ -80,6 +84,8 @@ class ApplicationService:
             raise
 
     async def _run(self, turn: OwnerTurn, epoch: int) -> str:
+        if turn.callback:
+            return await self.button(turn, epoch)
         if turn.uploads:
             return await AttachmentReader(self.model).run(turn, epoch)
         if turn.text.strip().rstrip('.!').casefold() == 'i agree to email processing':
@@ -227,7 +233,7 @@ class ApplicationService:
         if action.action == 'preference':
             if action.facts:
                 return 'Case facts cannot become general memory. Please clarify the preference to manage.'
-            return await ConversationService(turn.owner_id, PreferenceRunner(self.model, usage)).run(turn.text)
+            return await ConversationService(turn.owner_id, PreferenceRunner(self.model, usage, action.preference_intent)).run(turn.text)
         if action.action in ('conversation', 'memory'):
             if action.facts:
                 return 'Case facts cannot become general memory. Please clarify the preference or conversation information to manage.'
@@ -241,10 +247,51 @@ class ApplicationService:
                 return 'Please send an independent public question without case facts.'
             with tracing.public_content():
                 return await self.public_run(turn.text) if self.public_run else 'Public research is unavailable in this session.'
-        answer = await self.store.apply(turn, action, selection, current)
+        if action.action == 'show' and action.requested_fact_keys and current:
+            answer = '\n'.join(f'**{key.replace("_", " ").capitalize()}:** {current.facts.get(key, "Not recorded yet")}' for key in action.requested_fact_keys)
+        else:
+            answer = await self.store.apply(turn, action, selection, current)
         if action.action == 'show' and action.include_preferences:
             answer += '\n\n' + PreferenceInspection.render(await PreferenceStore().list(turn.owner_id))
         return answer
+
+    async def button(self, turn: OwnerTurn, epoch: int) -> str:
+        action = CaseAction.verify(turn.callback, turn.owner_id, epoch)
+        selection = await self.store.selection(turn.owner_id, turn.conversation_id)
+        if action is None or action.case_id != selection.case_id:
+            return 'That button belongs to an older or different case. Please tell me what you’d like to do.'
+        current = await self.store.get_case(turn.owner_id, action.case_id)
+        if current is None:
+            return 'That case is no longer available.'
+        if action.kind == 'g':
+            if self.correspondence.ensure_connected is not None:
+                try:
+                    await sync_to_async(self.correspondence.ensure_connected)()
+                except GmailDisconnected:
+                    raise GmailConnectionRequested('', True) from None
+            await self.correspondence.accept(turn.owner_id)
+            pending = await self.correspondence.pending_goal(turn)
+            return await self._run(replace(turn, text=pending, callback=''), epoch) if pending else 'Gmail is ready. What would you like help with?'
+        if action.kind == 'a':
+            if self.correspondence.mailbox is None:
+                return 'Please reconnect Gmail to continue.'
+            request = replace(turn, text='Approve the displayed sending plan', callback='')
+            return await FollowupService(self.correspondence.mailbox).control(request, selection, current,
+                IntakeAction(action='gmail_followup_approve', intent_quote=request.text), timezone.now(),
+                expected_generation=action.version)
+        if action.kind == 'd':
+            request = replace(turn, text='Draft a short reply for this case.', callback='')
+            return await CaseAssistance(self.model, self.store, self.correspondence, self.plan).run(
+                request, IntakeAction(action='case_help', case_id=current.id,
+                    intent_quote=request.text, gmail_draft=True), selection, current, RunUsage())
+        if action.kind == 'p':
+            if self.correspondence.mailbox is None:
+                return 'Please reconnect Gmail to continue.'
+            request = replace(turn, text='Review sending plan for this draft.', callback='')
+            return await FollowupService(self.correspondence.mailbox).control(request, selection, current,
+                IntakeAction(action='gmail_followup_propose', intent_quote=request.text,
+                    draft_version=action.version or None), timezone.now())
+        return 'That action is unavailable.'
 
     @staticmethod
     def is_memory_control(message: str) -> bool:
@@ -293,7 +340,7 @@ class SubscriptionApplicationService:
             if self.progress is not None:
                 if self.connection_task is not None and not self.connection_task.done():
                     return 'Gmail consent is already open on this Mac. Complete it there; I’ll continue automatically.'
-                self.connection_task = asyncio.create_task(self._connect_in_background(turn.followup(), request, epoch))
+                self.connection_task = asyncio.create_task(self._connect_in_background(replace(turn.followup(), callback=turn.callback), request, epoch))
                 return 'I’m opening Gmail consent on this Mac. You can keep chatting while I wait; I’ll continue your case when access is ready.'
             return await self._connect_and_resume(turn, request, epoch)
         except PublicResearchRequested:
@@ -314,10 +361,12 @@ class SubscriptionApplicationService:
         selection = await CaseStore().selection(turn.owner_id, turn.conversation_id)
         if selection.case_id != original_selection.case_id:
             return connected.message + ' Your selected case changed; tell me which case to continue.'
+        if turn.callback and CaseAction.verify(turn.callback, turn.owner_id, epoch):
+            await Correspondence.accept(turn.owner_id)
         pending = await Correspondence().pending_goal(turn)
         if pending and await Correspondence.consented(turn.owner_id):
-            resumed = await self._execute(replace(turn.followup(), text=pending), epoch)
-            return connected.message + '\n\n' + resumed
+            resumed = await self._execute(replace(turn.followup(), text=pending, callback=''), epoch)
+            return resumed
         if pending:
             return connected.message + '\n\n' + CONSENT_MESSAGE
         return connected.message + ' Tell me which email or case you need help with.'

@@ -48,7 +48,7 @@ def test_link_and_fallback_then_open_refreshes_without_creating(tmp_path: Path, 
             assert payload['reply_markup']['inline_keyboard'][0][0]['url'].endswith('#inbox?compose=abc123')
             assert 'https://mail.google.com' not in answer
         else:
-            assert 'reply_markup' not in payload
+            assert all('url' not in button for row in payload['reply_markup']['inline_keyboard'] for button in row)
             assert 'Gmail Drafts for owner@example.com' in answer
         answer = await harness.send('Open my latest Gmail draft')
         assert harness.reply_payloads[-1]['reply_markup']['inline_keyboard'][0][0]['url'].endswith('#inbox?compose=def456')

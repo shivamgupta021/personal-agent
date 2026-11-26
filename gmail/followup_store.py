@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from asgiref.sync import sync_to_async
 from django.db import transaction
 
+from core.actions import CaseAction
 from core.turns import OwnerTurn
 from gmail.followup_constants import FollowupStatus, LEASE_SECONDS, SendStatus
 from gmail.models import CaseFollowup, CaseMonitor, FollowupSend, MonitorNotification, FollowupApproval
@@ -80,10 +81,11 @@ class FollowupStore:
                 'draft_version': version, 'interval_minutes': interval, 'max_followups': maximum,
                 'sent_count': 0, 'next_due': now, 'approved_at': None, 'reason': ''})
             mutation.record('followup_propose', mutation.case)
-            return (f'For {current.label}, I’ll send draft v{version} to {envelope.recipient}, then follow up '
-                f'every {self.cadence(interval)}, at most {maximum} follow-up{"s" if maximum != 1 else ""}. Follow-ups stay in this thread and become '
-                'firmer when unanswered. I’ll pause for offers, payment claims, or questions needing your decision. '
-                'The local bot must remain running. Approve this sending plan, or tell me what to change.')
+            return (f'**Ready to send?**\nTo: {envelope.recipient}\n'
+                f'Follow up every {self.cadence(interval)}, at most {maximum} times. '
+                'I’ll pause for offers or questions needing your decision.\n\n'
+                + CaseAction('a', current.id, policy.generation).button('Approve & send', turn.owner_id, selection.deletion_epoch))
+
 
     @sync_to_async
     def control(self, turn: OwnerTurn, selection: SelectionView, current: CaseView, action: str, now: datetime, expected_generation: int | None = None) -> str:

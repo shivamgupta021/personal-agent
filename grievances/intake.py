@@ -90,7 +90,7 @@ class CaseIntake:
         self.store = store
         self.agent: Agent[str, IntakeAction] = Agent(
             model, deps_type=str, output_type=IntakeAction, instructions=INTAKE_INSTRUCTIONS,
-            name='case_intake', retries=constants.VALIDATION_RETRIES,
+            name='main_agent', retries=constants.VALIDATION_RETRIES,
             model_settings={'max_tokens': constants.MAX_OUTPUT_TOKENS})
         self.agent.instrument = tracing.private_instrumentation()
         self.agent.output_validator(self.validate_label)
@@ -111,7 +111,7 @@ class CaseIntake:
         if len(encoded) > constants.MAX_CONTEXT_CHARS:
             return 'This case directory exceeds the intake context limit. Nothing changed.'
         usage = RunUsage()
-        with tracing.operation('case.intake', context.directory, kind='agent', private=True) as span:
+        with tracing.operation('application.route', context.directory, kind='agent', private=True) as span:
             result = await self.agent.run(encoded, deps=turn.text, usage=usage,
                 usage_limits=UsageLimits(request_limit=constants.MAX_MODEL_REQUESTS),
                 timeout=constants.RUN_TIMEOUT_SECONDS)

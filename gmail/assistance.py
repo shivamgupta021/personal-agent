@@ -9,11 +9,13 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
+from core.actions import CaseAction
 from core.tracing import tracing
 from core.turns import OwnerTurn
 from gmail import constants
 from gmail.correspondence import Correspondence
 from gmail.drafts import GmailDraftService
+from gmail.models import GmailDraftExport
 from gmail.records import CorrespondenceSnapshot
 from gmail.errors import GmailDisconnected, GmailError, GmailComposeRequired
 from gmail.prompts import MAIL_BRIEF_INSTRUCTIONS, MAIL_MATCH_INSTRUCTIONS
@@ -72,8 +74,6 @@ class CaseAssistance:
                 return 'The case changed while I was working. Please try again.'
             selection = refreshed
         current = target
-        if created:
-            plan_text = await self.plan.present(turn, current, selection.deletion_epoch)
         prefix = plan_text + '\n\n' if plan_text else ''
         already_recorded = await CaseMessage.objects.filter(case_id=current.id, role='user', text=turn.text).aexists()
         if action.facts and not already_recorded:
@@ -88,18 +88,34 @@ class CaseAssistance:
                 await sync_to_async(self.correspondence.ensure_connected)()
             except GmailDisconnected:
                 await self.correspondence.remember_goal(turn, selection, current, constants.CONNECT_MESSAGE)
-                return prefix + constants.CONNECT_MESSAGE
+                return self.plan.text(current) + '\n\n' + self.access_prompt(turn, current, selection, connected=False)
             except GmailError:
                 return 'I could not check the Gmail connection just now. Please try again; no emails were read or sent.'
         if not await self.correspondence.consented(turn.owner_id):
             await self.correspondence.remember_goal(turn, selection, current)
-            return prefix + await self.correspondence.run(turn, 'gmail_search', selection, current)
+            return self.plan.text(current) + '\n\n' + self.access_prompt(turn, current, selection, connected=True)
+        if created:
+            plan_text = await self.plan.present(turn, current, selection.deletion_epoch)
+            prefix = plan_text + '\n\n' if plan_text else ''
         answer = await self.correspondence.assist(turn, selection, current, usage, self,
             draft=action.gmail_draft or action.gmail_revision, recipient=action.gmail_recipient,
             revision=action.gmail_revision, version=action.draft_version)
         monitoring = await MonitoringStore().control(turn.followup().followup().followup(),
             selection, current, 'gmail_monitor_start', timezone.now(), automatic=True)
-        return prefix + answer + ('\n\n' + monitoring if monitoring.startswith('I’ll watch') else '')
+        export = await GmailDraftExport.objects.filter(draft__operation__owner_id=turn.owner_id,
+            draft__operation__delivery_id=turn.delivery_id, status='created').select_related('draft').afirst()
+        if export:
+            answer += '\n\n' + CaseAction('p', current.id, export.draft.version).button('Review sending plan', turn.owner_id, selection.deletion_epoch)
+        if not (action.gmail_draft or action.gmail_revision):
+            answer += '\n\n' + CaseAction('d', current.id).button('Draft a reply', turn.owner_id, selection.deletion_epoch)
+        return prefix + answer
+
+    @staticmethod
+    def access_prompt(turn: OwnerTurn, current: CaseView, selection: SelectionView, *, connected: bool) -> str:
+        label = 'Continue with Gmail' if connected else 'Connect Gmail'
+        return ('Relevant emails will be processed by the model provider to help with this case. '
+            'Local trace capture follows your debugging settings.\n\n'
+            + CaseAction('g', current.id).button(label, turn.owner_id, selection.deletion_epoch))
 
     async def draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
                     row: CorrespondenceSnapshot, usage: RunUsage, recipient: str,
