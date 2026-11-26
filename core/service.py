@@ -1,5 +1,6 @@
 """Main orchestrator: select a specialist and return its completed reply."""
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage
@@ -53,7 +54,15 @@ class ApplicationService:
             return replay
         route = await self.router.route(turn)
         if route.specialist == 'grievance':
-            return await self.cases.execute(turn, epoch)
+            answer = await self.cases.execute(turn, epoch)
+            if route.conversation_question:
+                question = route.conversation_question.strip()
+                secondary = replace(turn, text=question)
+                if (question not in turn.text or self.is_memory_control(question)
+                        or not await CaseStore().general_allowed(secondary, epoch)):
+                    return answer + '\n\nPlease ask the unrelated conversation question separately.'
+                answer += '\n\n' + await self.conversation(secondary, read_only=True)
+            return answer
         if route.specialist == 'attachments':
             return await AttachmentReader(self.model).run(turn, epoch)
         # A model's routing decision cannot authorize leaking case material.
@@ -66,8 +75,8 @@ class ApplicationService:
                 return await self.public_run(turn.text) if self.public_run else 'Public research is unavailable in this session.'
         return await self.conversation(turn)
 
-    async def conversation(self, turn: OwnerTurn) -> str:
-        return await ConversationService(turn.owner_id, ConversationMemoryRunner(self.model)).run(turn.text)
+    async def conversation(self, turn: OwnerTurn, *, read_only: bool = False) -> str:
+        return await ConversationService(turn.owner_id, ConversationMemoryRunner(self.model, read_only=read_only)).run(turn.text)
 
     @staticmethod
     def is_memory_control(message: str) -> bool:

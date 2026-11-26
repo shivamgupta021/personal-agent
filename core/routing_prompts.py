@@ -1,6 +1,10 @@
 ROUTING_INSTRUCTIONS = '''Choose the one specialist that owns this user request.
 Your only job is delegation. Do not answer, extract facts, interpret preferences,
 select email threads, set schedules, write drafts, or propose execution arguments.
+If a grievance request ALSO asks an independent question about earlier general
+conversation, copy that question verbatim into conversation_question. The
+conversation specialist will answer that part separately. Do not include case
+facts or case instructions in it. Otherwise leave conversation_question empty.
 
 - grievance: refunds/complaints, case facts, correspondence, Gmail connection,
   drafts, sending approvals, follow-ups, monitoring, reminders and case outcomes.

@@ -19,6 +19,7 @@ from conversations.direct import DirectConversation
 class Route(BaseModel):
     model_config = ConfigDict(extra='forbid')
     specialist: Literal['grievance', 'preferences', 'conversation', 'research', 'attachments']
+    conversation_question: str = ''
 
 
 class IntentRouter:

@@ -14,6 +14,52 @@ from preferences.models import SavedPreference
 
 
 @pytest.mark.django_db(transaction=True)
+def test_mixed_case_and_conversation_question_returns_both_without_leaking_case_facts() -> None:
+    stages: list[str] = []
+    case = GrievanceCase.objects.create(owner_id='owner', label='Shop', label_key='shop', revision=1)
+    CaseFactRevision.objects.create(case=case, revision=1, facts={'purchase_date': '21 November', 'order_reference': 'PRIVATE-ORDER'})
+    CaseSelection.objects.create(owner_id='owner', conversation_id='owner', case=case)
+    question = 'which two languages did I mention earlier?'
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        result: dict[str, Any]
+        if not info.output_tools:
+            stages.append('conversation')
+            assert {tool.name for tool in info.function_tools} == {'recall_conversation'}
+            assert 'PRIVATE-ORDER' not in str(messages)
+            assert 'purchase date' not in str(messages)
+            return ModelResponse(parts=[TextPart('Python and Ruby.')])
+        schema = info.output_tools[0].parameters_json_schema
+        if 'specialist' in schema['properties']:
+            stages.append('route')
+            result = {'specialist': 'grievance', 'conversation_question': question}
+        else:
+            stages.append('case')
+            result = {'action': 'show', 'requested_fields': ['purchase_date']}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, result)])
+    answer = asyncio.run(ApplicationService(FunctionModel(respond)).run(OwnerTurn(
+        'owner', 'owner', 'mixed', 'What purchase date did I correct, and ' + question)))
+    assert '21 November' in answer and 'Python and Ruby.' in answer
+    assert stages == ['route', 'case', 'conversation']
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('question', ['Invented question', 'What is PRIVATE-ORDER?'])
+def test_mixed_route_cannot_invent_or_move_case_details_into_conversation(question: str) -> None:
+    case = GrievanceCase.objects.create(owner_id='owner', label='Shop', label_key='shop', revision=1)
+    CaseFactRevision.objects.create(case=case, revision=1, facts={'order_reference': 'PRIVATE-ORDER'})
+    CaseSelection.objects.create(owner_id='owner', conversation_id='owner', case=case)
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        assert info.output_tools, 'Must not invoke the conversation specialist'
+        schema = info.output_tools[0].parameters_json_schema
+        result = ({'specialist': 'grievance', 'conversation_question': question}
+                  if 'specialist' in schema['properties'] else {'action': 'show'})
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, result)])
+    answer = asyncio.run(ApplicationService(FunctionModel(respond)).run(OwnerTurn(
+        'owner', 'owner', 'mixed', 'Show my case. What is PRIVATE-ORDER?')))
+    assert 'Please ask the unrelated conversation question separately.' in answer
+
+
+@pytest.mark.django_db(transaction=True)
 def test_main_only_routes_and_preference_specialist_saves_without_final_generation() -> None:
     stages: list[str] = []
     request = 'Remember that I prefer plain English.'
@@ -21,7 +67,7 @@ def test_main_only_routes_and_preference_specialist_saves_without_final_generati
         result: dict[str, Any]
         schema = info.output_tools[0].parameters_json_schema
         if not stages:
-            assert set(schema['properties']) == {'specialist'}
+            assert set(schema['properties']) == {'specialist', 'conversation_question'}
             assert 'facts' not in schema['properties']
             stages.append('orchestrator')
             result = {'specialist': 'preferences'}

@@ -1,7 +1,8 @@
 # Route requests without interpreting specialist tasks
 
 The main orchestrator classifies a request and delegates it. Its model output contains
-only a specialist name. It does not extract case facts or preferences, choose draft
+the specialist name and, for a mixed case/general-conversation question, an optional
+verbatim general-conversation question. It does not extract case facts or preferences, choose draft
 versions, set schedules, or generate conversational answers.
 
 `core/service.py` owns delegation and returns the specialist's completed reply.
@@ -25,6 +26,10 @@ Privacy and ownership checks remain executable code, not routing-model permissio
 Known help/inspection messages, exact deletion controls, uploads and authenticated
 buttons need no model routing. Button approvals remain bound to the displayed plan.
 There is no automatic final model call to paraphrase a complete specialist answer.
+For a mixed question, the application checks that the secondary question was copied
+from the user's message and passes the case privacy boundary before delegating it.
+It combines the two specialist replies without an extra generation. This prevents a
+case-only reply from silently omitting an independent conversation question.
 
 An open-ended preference save now requires a small routing call and a preference
 specialist call. This deliberately separates responsibilities; it does not promise

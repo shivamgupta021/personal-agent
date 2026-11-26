@@ -15,7 +15,7 @@ def test_acknowledgement_and_followup_delegate_once_and_persist_history() -> Non
     stages = []
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if info.output_tools:
-            assert set(info.output_tools[0].parameters_json_schema['properties']) == {'specialist'}
+            assert set(info.output_tools[0].parameters_json_schema['properties']) == {'specialist', 'conversation_question'}
             stages.append('router')
             return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'specialist':'conversation'})])
         stages.append('conversation')
