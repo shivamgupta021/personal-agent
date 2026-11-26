@@ -27,6 +27,7 @@ class IntakeAction(BaseModel):
         description='Use deleted_details only when the owner asks about retrieving details of a deleted case; this selects a fixed explanation, not a deletion action.')
     reminder_kind: Literal['no_response', 'draft_review'] | None = Field(default=None, description='Set for a new purpose; leave null when moving an existing reminder.')
     conversation_reply: str = Field(default='', max_length=MAX_INLINE_REPLY_CHARS, description='Optional final answer for ordinary conversation only; leave empty when recall, compaction or memory tools are needed.')
+    include_preferences: bool = Field(default=False, description='For a read-only case show request that also explicitly asks about saved preferences.')
     followup_interval_minutes: int = Field(default=DEFAULT_INTERVAL_MINUTES, ge=1, le=MAX_INTERVAL_MINUTES)
     followup_maximum: int = Field(default=DEFAULT_MAX_FOLLOWUPS, ge=1, le=MAX_FOLLOWUPS)
     reminder_at: datetime | None = None

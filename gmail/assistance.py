@@ -17,7 +17,9 @@ from gmail.drafts import GmailDraftService
 from gmail.records import CorrespondenceSnapshot
 from gmail.errors import GmailDisconnected, GmailError, GmailComposeRequired
 from gmail.prompts import MAIL_BRIEF_INSTRUCTIONS, MAIL_MATCH_INSTRUCTIONS
+from grievances.models import CaseMessage
 from grievances.schema import IntakeAction
+from grievances.plan import CasePlan
 from grievances.store import CaseStore, CaseView, SelectionView
 
 
@@ -27,7 +29,8 @@ class MailMatch(BaseModel):
 
 
 class CaseAssistance:
-    def __init__(self, model: Model, store: CaseStore, correspondence: Correspondence) -> None:
+    def __init__(self, model: Model, store: CaseStore, correspondence: Correspondence, plan: CasePlan | None = None) -> None:
+        self.plan = plan or CasePlan()
         self.model = model
         self.store = store
         self.correspondence = correspondence
@@ -42,6 +45,8 @@ class CaseAssistance:
                   current: CaseView | None, usage: RunUsage) -> str:
         if not action.intent_quote or action.intent_quote not in turn.text:
             return 'Which problem would you like help with?'
+        plan_text = ''
+        created = False
         target = await self.store.get_case(turn.owner_id, action.case_id) if action.case_id else None
         if target is None and not action.case_id and action.label.strip() and action.label in turn.text:
             child = turn.followup()
@@ -54,6 +59,7 @@ class CaseAssistance:
             if target is None or ' '.join(target.label.casefold().split()) != ' '.join(action.label.casefold().split()):
                 return 'I could not open that problem without changing existing information. Which booking or purchase is this about?'
             selection = refreshed
+            created = True
         if target is None:
             return 'Which company or problem is this about?'
         if selection.case_id != target.id:
@@ -66,7 +72,11 @@ class CaseAssistance:
                 return 'The case changed while I was working. Please try again.'
             selection = refreshed
         current = target
-        if action.gmail_revision and action.facts:
+        if created:
+            plan_text = await self.plan.present(turn, current, selection.deletion_epoch)
+        prefix = plan_text + '\n\n' if plan_text else ''
+        already_recorded = await CaseMessage.objects.filter(case_id=current.id, role='user', text=turn.text).aexists()
+        if action.facts and not already_recorded:
             saved = await self.store.apply(turn.followup().followup(), IntakeAction(action='update',
                 case_id=current.id, facts=action.facts, correction_quote=action.correction_quote), selection, current)
             refreshed_case = await self.store.get_case(turn.owner_id, current.id)
@@ -78,18 +88,18 @@ class CaseAssistance:
                 await sync_to_async(self.correspondence.ensure_connected)()
             except GmailDisconnected:
                 await self.correspondence.remember_goal(turn, selection, current, constants.CONNECT_MESSAGE)
-                return constants.CONNECT_MESSAGE
+                return prefix + constants.CONNECT_MESSAGE
             except GmailError:
                 return 'I could not check the Gmail connection just now. Please try again; no emails were read or sent.'
         if not await self.correspondence.consented(turn.owner_id):
             await self.correspondence.remember_goal(turn, selection, current)
-            return await self.correspondence.run(turn, 'gmail_search', selection, current)
+            return prefix + await self.correspondence.run(turn, 'gmail_search', selection, current)
         answer = await self.correspondence.assist(turn, selection, current, usage, self,
             draft=action.gmail_draft or action.gmail_revision, recipient=action.gmail_recipient,
             revision=action.gmail_revision, version=action.draft_version)
         monitoring = await MonitoringStore().control(turn.followup().followup().followup(),
             selection, current, 'gmail_monitor_start', timezone.now(), automatic=True)
-        return answer + ('\n\n' + monitoring if monitoring.startswith('I’ll watch') else '')
+        return prefix + answer + ('\n\n' + monitoring if monitoring.startswith('I’ll watch') else '')
 
     async def draft(self, turn: OwnerTurn, selection: SelectionView, current: CaseView,
                     row: CorrespondenceSnapshot, usage: RunUsage, recipient: str,

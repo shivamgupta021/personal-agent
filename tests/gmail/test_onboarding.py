@@ -196,3 +196,47 @@ def test_readonly_draft_request_is_saved_for_consent_resume(tmp_path: Path) -> N
         asyncio.run(scenario())
     finally:
         harness.http.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_pending_consent_does_not_block_other_messages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ready = asyncio.Event()
+    started = asyncio.Event()
+    delivered: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        data = json.loads(str(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart))))
+        request = data['current_request']
+        result = ({'action': 'gmail_connect', 'gmail_account': 'owner@example.com', 'intent_quote': request}
+            if request.startswith('Connect') else {'action': 'conversation', 'conversation_reply': '323'})
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, result)])
+
+    @asynccontextmanager
+    async def model(self: SubscriptionService, name: str = '') -> AsyncIterator[Model]:
+        yield FunctionModel(respond)
+
+    async def connect(turn: OwnerTurn, email: str, compose: bool) -> ConnectionAttempt:
+        started.set()
+        await ready.wait()
+        return ConnectionAttempt(True, 'Gmail connected.')
+
+    async def public(message: str) -> str:
+        raise AssertionError('Unexpected extra model call')
+
+    async def deliver(reply: object) -> None:
+        delivered.append(str(reply))
+
+    monkeypatch.setattr(SubscriptionService, 'model', model)
+    service = SubscriptionApplicationService(SubscriptionService(tmp_path), public, connect, progress=deliver)
+
+    async def scenario() -> None:
+        reply = await asyncio.wait_for(service.run(OwnerTurn('owner', 'owner', 'connect', 'Connect Gmail for owner@example.com')), 3)
+        assert 'consent' in reply.lower()
+        await started.wait()
+        answer = await service.run(OwnerTurn('owner', 'owner', 'other', 'What is 17 times 19?'))
+        assert answer == '323'
+        ready.set()
+        await service.finish_connections()
+        assert len(delivered) == 1 and 'Gmail connected.' in delivered[0]
+
+    asyncio.run(scenario())

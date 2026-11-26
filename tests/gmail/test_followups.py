@@ -273,3 +273,39 @@ def test_proposal_does_not_override_explicit_monitoring_stop() -> None:
     MonitoringStore.stop(CaseMonitor.objects.get(), 'owner stopped')
     assert 'Approve this sending plan' not in h.say('Prepare automatic sending')
     assert not CaseMonitor.objects.get().active
+
+
+@pytest.mark.django_db(transaction=True)
+def test_repeated_approval_reports_active_plan_without_duplicate_send() -> None:
+    h = FollowupHarness()
+    h.approve()
+    h.tick()
+    reply = h.say('Approve this sending plan')
+    assert 'active' in reply
+    assert 'changed' not in reply
+    h.tick()
+    assert len(h.mailbox.sent) == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_natural_withdrawal_closes_case_and_stops_all_jobs() -> None:
+    h = FollowupHarness()
+    h.approve()
+    request = 'Stop automatic sending and close Demo Store as withdrawn, not refunded.'
+    original = h.respond
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        data = json.loads(str(next(p.content for p in messages[-1].parts if isinstance(p, UserPromptPart))))
+        if data.get('current_request') == request:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                {'action': 'close_without_resolution', 'intent_quote': request})])
+        return original(messages, info)
+
+    h.app = ApplicationService(FunctionModel(respond), correspondence=Correspondence(lambda: nullcontext(h.mailbox)))
+    reply = h.say(request)
+    h.case.refresh_from_db()
+    assert h.case.status == 'closed_without_resolution', reply
+    assert not CaseMonitor.objects.get().active
+    assert CaseFollowup.objects.get().status == FollowupStatus.STOPPED
+    h.tick()
+    assert not h.mailbox.sent

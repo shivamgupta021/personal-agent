@@ -13,7 +13,8 @@ from core.turns import OwnerTurn
 class CapabilityHelp:
     @staticmethod
     def matches(message: str) -> bool:
-        return ' '.join(message.strip().rstrip('?.!').casefold().split()) in CAPABILITY_REQUESTS
+        normalized = ' '.join(message.strip().rstrip('?.!').casefold().replace('!', ',').split())
+        return normalized in CAPABILITY_REQUESTS
 
     async def run(self, turn: OwnerTurn) -> str:
         with tracing.operation('application.help', {'message': turn.text}, private=True) as span:

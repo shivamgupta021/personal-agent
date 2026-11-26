@@ -43,6 +43,6 @@ class GmailOnboarding:
                     self.client_file, email, compose=compose)
             except GmailError:
                 tracing.record_output(span, {'connected': False})
-                return ConnectionAttempt(False, 'Gmail connection did not complete. Consent may have been cancelled, timed out, or used a different account. Your previous connection is preserved. Ask me to connect Gmail again when ready.')
+                return ConnectionAttempt(False, 'Gmail connection did not complete. Consent may have been cancelled, timed out, or used a different account. Any existing connection has not been replaced. Ask me to connect Gmail again when ready.')
             tracing.record_output(span, {'connected': True, 'compose': compose})
             return ConnectionAttempt(True, result)

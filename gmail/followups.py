@@ -129,7 +129,7 @@ class FollowupWorker:
                     retries=constants.PLANNER_RETRIES, model_settings={'max_tokens': MAX_DECISION_TOKENS})
                 agent.instrument = tracing.private_instrumentation()
                 decision = (await agent.run(json.dumps({'approved_first_message': asdict(job.first),
-                    'approved_baseline_message_ids': job.baseline, 'followup_number': job.count, 'sent_messages': job.sent,
+                    'approved_baseline_message_ids': job.baseline, 'followup_number': job.count, 'maximum_followups': job.maximum, 'is_final_followup': job.count == job.maximum, 'sent_messages': job.sent,
                     'current_time': self.clock().isoformat(), 'correspondence': [m.evidence() for m in evidence.items]}, default=str),
                     timeout=constants.ASSISTANCE_TIMEOUT_SECONDS)).output
             if decision.action == 'pause' or not decision.body.strip() or len(decision.body.split()) > MAX_BODY_WORDS:

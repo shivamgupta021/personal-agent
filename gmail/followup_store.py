@@ -26,6 +26,7 @@ class FollowupJob:
     first: DraftEnvelope
     baseline: tuple[str, ...]
     sent: tuple[dict[str, object], ...]
+    maximum: int
 
     def turn(self) -> OwnerTurn:
         return OwnerTurn(self.owner_id, 'followup:' + str(self.identifier),
@@ -101,10 +102,10 @@ class FollowupStore:
                 return 'Automatic sending stopped. Reply monitoring remains on.'
             if action == 'gmail_followup_status':
                 return f'Automatic sending: {policy.status}. Confirmed sends: {policy.sent_count}. {policy.reason}'
-            if expected_generation != policy.generation:
-                return 'The sending plan changed while approval was being checked. Please review it again.'
             if policy.status != FollowupStatus.PROPOSED:
                 return f'The sending plan is {policy.status}; this approval did not schedule another email.'
+            if expected_generation != policy.generation:
+                return 'The sending plan changed while approval was being checked. Please review it again.'
             if not self.eligible(policy):
                 return 'The case or connection changed. Please request a fresh sending plan.'
             policy.status, policy.approved_at, policy.next_due = FollowupStatus.ACTIVE, now, now
@@ -140,7 +141,7 @@ class FollowupStore:
                 sent = tuple(FollowupSend.objects.filter(policy=policy, generation=policy.generation,
                     status=SendStatus.SENT).order_by('sequence').values('envelope', 'created_at'))
                 return FollowupJob(policy.pk, policy.generation, owner_id, str(policy.case.pk), policy.sent_count,
-                    DraftEnvelope(**policy.envelope), tuple(policy.baseline_ids), sent)
+                    DraftEnvelope(**policy.envelope), tuple(policy.baseline_ids), sent, policy.max_followups)
         return None
 
     def locked(self, job: FollowupJob) -> CaseFollowup | None:

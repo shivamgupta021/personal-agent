@@ -8,6 +8,7 @@ AUTHORIZATION_TIMEOUT_SECONDS = 60
 # Whole-message read shortcuts; unfamiliar or mixed requests use the model router.
 INSPECTION_PHRASES = frozenset((
     'what preferences have you saved',
+    'what preferences have you saved about me',
     'what are my saved preferences',
     'what are my preferences',
     'what preferences do you remember',
