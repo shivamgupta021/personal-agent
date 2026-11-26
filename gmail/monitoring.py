@@ -12,6 +12,7 @@ from django.utils import timezone
 from core.tracing import tracing
 from core.turns import OwnerTurn, PreparedReply
 from gmail.mailbox import Mailbox
+from gmail.followups import FollowupWorker
 from gmail.errors import GmailBusy
 from subscriptions.auth import SubscriptionBusy
 from gmail.monitoring_constants import MAX_CASES_PER_TICK
@@ -52,6 +53,9 @@ class MonitoringWorker:
                 logger.warning('Monitoring check unavailable; preserving state and backing off')
                 await self.store.finish(job, ReplyCheckResult('Reply status unknown'), self.clock())
             await self.deliver_pending(owner_id)
+
+        await FollowupWorker(self.model_session, self.mailbox, self.clock).tick(owner_id)
+        await self.deliver_pending(owner_id)
 
     async def check(self, job: MonitorJob, turn: OwnerTurn) -> str:
         return (await self.check_result(job, turn)).answer

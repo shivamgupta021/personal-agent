@@ -353,3 +353,21 @@ def test_monitor_retries_quote_assigned_to_wrong_message() -> None:
     assert CaseMonitor.objects.get().failures == 0
     assert not h.delivered
     assert calls == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_long_notification_preserves_every_finding() -> None:
+    h = MonitoringHarness()
+    h.control()
+    CaseMonitor.objects.update(next_check=h.now)
+    for index in range(6):
+        h.mailbox.messages.append(ImportedMessage('long' + str(index), 'thread1', 'support@example.com',
+            'Reply', '', ('evidence ' * 70) + f'END-{index}', False))
+    h.tick()
+    delivered = ''.join(h.delivered)
+    assert all(f'END-{index}' in delivered for index in range(6))
+    assert all(len(text) <= 2500 for text in h.delivered)
+    h.now += timedelta(minutes=10)
+    previous = list(h.delivered)
+    h.tick()
+    assert h.delivered == previous

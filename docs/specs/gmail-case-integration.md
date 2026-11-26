@@ -122,3 +122,32 @@ The owner explicitly requested readable real-email traces during local developme
 ## 24 November refinement
 
 The owner approved automatic monitoring during active case assistance after relevant correspondence is selected. Confirm activation in the reply; preserve an explicit previous stop. This supersedes earlier opt-in-only monitoring wording. Exact reminder deadlines remain owner-requested or explicitly accepted, and sending evidence remains required. Consolidated schema and architecture review is deferred until the building phase is complete; then perform an isolated fresh-user demo. See `docs/architecture/data-model.md`.
+
+## Approved automatic correspondence — 26 November 2026
+
+The owner's latest instruction supersedes the manual-sending-only exclusions above:
+first request case-specific approval; thereafter send bounded follow-ups automatically.
+A proposed plan identifies the exact reviewed draft, recipient, selected thread, cadence
+(default two days) and maximum follow-ups (default three). Creating a draft or connecting
+Gmail never approves a plan. Approval is a distinct owner turn. Draft edits before approval
+require a new proposal. A new plan cannot silently resend an already-sent first message.
+
+The existing local scheduler executes approved plans, with no second process. It reads
+fresh correspondence before each send, generates concise follow-ups (at most 150 words),
+and becomes firmer based on actual sent attempts rather than draft versions. Rejections
+may lead to factual reconsideration requests; offers, payment claims, ambiguous replies,
+and requests needing new owner information pause for a decision. No offer is accepted and
+no refund or case resolution is inferred. Sending stays within the approved recipient,
+thread, cadence and attempt limit. Gmail's official drafts.send endpoint sends the exact approved first-message snapshot
+and consumes its review draft; messages.send sends subsequent approved-policy follow-ups.
+
+Stop, disconnect, case closure, fact changes and incomplete evidence prevent further sends.
+A durable attempted record precedes Gmail handoff. Ambiguous outcomes pause permanently
+until owner review; no blind retries. Progress and send/pause notifications retain traces.
+Original send snapshots/approvals/receipts are case-owned and cascade with case deletion.
+
+Acceptance: public owner-turn plus real temporary database/controlled Gmail/model tests
+cover approval, exact first message, timed follow-ups, restart, limit, stop, changed facts,
+new offers, changed drafts and ambiguous handoff. Separate live fictional-account testing
+must prove actual recipient delivery, scheduler operation, tone progression and offer pause.
+Controlled responses establish orchestration only, not model writing quality.

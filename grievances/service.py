@@ -10,6 +10,8 @@ from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior, Usage
 from pydantic_ai.models import Model
 
 from gmail.assistance import CaseAssistance
+from gmail.followups import FollowupService
+from gmail.errors import GmailError
 from attachments.reader import AttachmentReader
 from gmail.onboarding import GmailConnectionRequested, ConnectionAttempt
 from gmail.drafts import GmailDraftService
@@ -99,6 +101,13 @@ class ApplicationService:
                     or not action.intent_quote or action.intent_quote not in turn.text):
                 return 'Which Gmail address should I connect?'
             raise GmailConnectionRequested(action.gmail_account, True)
+        if action.action.startswith('gmail_followup_'):
+            if current is None or self.correspondence.mailbox is None:
+                return 'Please select the case and connect Gmail before planning automatic emails.'
+            try:
+                return await FollowupService(self.correspondence.mailbox).control(turn, selection, current, action, timezone.now())
+            except GmailError as gmail_error:
+                return str(gmail_error)
         if action.action.startswith('gmail_reminder_'):
             if action.case_id and action.case_id != selection.case_id:
                 target = await self.store.get_case(turn.owner_id, action.case_id)

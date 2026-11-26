@@ -88,3 +88,48 @@ class CaseReminder(models.Model):
     dismissed_message_ids = models.JSONField(default=list)
     question_message_ids = models.JSONField(default=list)
     reason: models.TextField[str, str] = models.TextField(default='')
+
+
+class CaseFollowup(models.Model):
+    """One explicit approval binds the first message and subsequent send limits."""
+    case: models.OneToOneField[GrievanceCase, GrievanceCase] = models.OneToOneField(GrievanceCase, on_delete=models.CASCADE)
+    monitor: models.ForeignKey[CaseMonitor, CaseMonitor] = models.ForeignKey(CaseMonitor, on_delete=models.CASCADE)
+    status: models.CharField[str, str] = models.CharField(max_length=16, default='proposed')
+    generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=1)
+    fact_revision: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    envelope = models.JSONField()
+    baseline_ids = models.JSONField(default=list)
+    draft_version: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    interval_minutes: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    max_followups: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    sent_count: models.PositiveIntegerField[int, int] = models.PositiveIntegerField(default=0)
+    next_due: models.DateTimeField[datetime, datetime] = models.DateTimeField()
+    approved_at: models.DateTimeField[datetime | None, datetime | None] = models.DateTimeField(null=True)
+    reason: models.TextField[str, str] = models.TextField(default='')
+
+
+class FollowupSend(models.Model):
+    """Durable external handoff: an ambiguous attempt must never be retried blindly."""
+    policy: models.ForeignKey[CaseFollowup, CaseFollowup] = models.ForeignKey(CaseFollowup, on_delete=models.CASCADE)
+    generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    sequence: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    envelope = models.JSONField()
+    status: models.CharField[str, str] = models.CharField(max_length=16, default='attempted')
+    message_id: models.CharField[str, str] = models.CharField(max_length=128, default='')
+    created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['policy', 'generation', 'sequence'], name='unique_followup_handoff')]
+
+
+class FollowupApproval(models.Model):
+    """Immutable terms of each owner approval, retained when the next plan replaces it."""
+    policy: models.ForeignKey[CaseFollowup, CaseFollowup] = models.ForeignKey(CaseFollowup, on_delete=models.CASCADE)
+    generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    approved_at: models.DateTimeField[datetime, datetime] = models.DateTimeField()
+    conversation_id: models.CharField[str, str] = models.CharField(max_length=128)
+    delivery_id: models.CharField[str, str] = models.CharField(max_length=128)
+    terms = models.JSONField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['policy', 'generation'], name='unique_followup_approval')]

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 from conversations.constants import MAX_INLINE_REPLY_CHARS
+from gmail.followup_constants import DEFAULT_INTERVAL_MINUTES, DEFAULT_MAX_FOLLOWUPS, MAX_FOLLOWUPS, MAX_INTERVAL_MINUTES
 
 from grievances.constants import (MAX_FOLLOWUP_REPLIES, MAX_REPLY_CHARS, MAX_FACT_CHARS, POLICY_MAX_FINDINGS, POLICY_MAX_QUOTE_CHARS,
                                   POLICY_PUBLIC_FIELD_CHARS, POLICY_SITE_URL_CHARS)
@@ -21,11 +22,13 @@ class SuppliedFact(BaseModel):
 
 
 class IntakeAction(BaseModel):
-    action: Literal['read_attachment', 'preference', 'list_preferences', 'gmail_connect', 'gmail_reminder_set', 'gmail_reminder_status', 'gmail_reminder_cancel', 'gmail_reminder_clarify', 'gmail_monitor_start', 'gmail_monitor_stop', 'gmail_monitor_status', 'case_help', 'gmail_open_draft', 'gmail_check_replies', 'gmail_search', 'gmail_select', 'gmail_show', 'delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'conversation', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
+    action: Literal['gmail_followup_propose', 'gmail_followup_approve', 'gmail_followup_stop', 'gmail_followup_status', 'read_attachment', 'preference', 'list_preferences', 'gmail_connect', 'gmail_reminder_set', 'gmail_reminder_status', 'gmail_reminder_cancel', 'gmail_reminder_clarify', 'gmail_monitor_start', 'gmail_monitor_stop', 'gmail_monitor_status', 'case_help', 'gmail_open_draft', 'gmail_check_replies', 'gmail_search', 'gmail_select', 'gmail_show', 'delete', 'create', 'list', 'select', 'show', 'update', 'leave', 'public', 'conversation', 'memory', 'clarify', 'draft', 'list_drafts', 'read_draft', 'review_research', 'confirm_research', 'research', 'record_sent', 'record_reply', 'resolve', 'close_without_resolution', 'follow_up']
     clarification_reason: Literal['unspecified', 'deleted_details'] = Field(default='unspecified',
         description='Use deleted_details only when the owner asks about retrieving details of a deleted case; this selects a fixed explanation, not a deletion action.')
     reminder_kind: Literal['no_response', 'draft_review'] | None = Field(default=None, description='Set for a new purpose; leave null when moving an existing reminder.')
     conversation_reply: str = Field(default='', max_length=MAX_INLINE_REPLY_CHARS, description='Optional final answer for ordinary conversation only; leave empty when recall, compaction or memory tools are needed.')
+    followup_interval_minutes: int = Field(default=DEFAULT_INTERVAL_MINUTES, ge=1, le=MAX_INTERVAL_MINUTES)
+    followup_maximum: int = Field(default=DEFAULT_MAX_FOLLOWUPS, ge=1, le=MAX_FOLLOWUPS)
     reminder_at: datetime | None = None
     deadline_quote: str = Field(default='', max_length=500)
     reply_is_substantive: bool | None = None
