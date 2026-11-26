@@ -138,8 +138,8 @@ and becomes firmer based on actual sent attempts rather than draft versions. Rej
 may lead to factual reconsideration requests; offers, payment claims, ambiguous replies,
 and requests needing new owner information pause for a decision. No offer is accepted and
 no refund or case resolution is inferred. Sending stays within the approved recipient,
-thread, cadence and attempt limit. Gmail's official messages.send endpoint sends the exact
-approved snapshot; the reviewed Gmail draft remains available as an unsent review copy.
+thread, cadence and attempt limit. Gmail's official drafts.send endpoint sends the exact approved first-message snapshot
+and consumes its review draft; messages.send sends subsequent approved-policy follow-ups.
 
 Stop, disconnect, case closure, fact changes and incomplete evidence prevent further sends.
 A durable attempted record precedes Gmail handoff. Ambiguous outcomes pause permanently

@@ -18,11 +18,11 @@ from core.tracing import tracing
 from core.turns import OwnerTurn
 from core.workers import drain_on_cancel
 from gmail import constants
-from gmail.followup_constants import MAX_BODY_CHARS, MAX_BODY_WORDS, MAX_DECISION_TOKENS, MAX_JOBS_PER_TICK
+from gmail.followup_constants import MAX_BODY_CHARS, MAX_BODY_WORDS, MAX_DECISION_TOKENS, MAX_JOBS_PER_TICK, MAX_REASON_CHARS
 from gmail.followup_prompts import FOLLOWUP_INSTRUCTIONS
 from gmail.followup_store import FollowupJob, FollowupStore
 from gmail.mailbox import Mailbox
-from gmail.models import CaseMailbox, CaseFollowup
+from gmail.models import CaseMailbox, CaseFollowup, GmailDraftExport
 from gmail.records import DraftEnvelope, ImportedMessage, MailResult
 from gmail.revisions import DraftRevisions
 from gmail.monitoring_store import MonitoringStore
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class FollowupDecision(BaseModel):
     action: Literal['send', 'pause']
     body: str = Field(default='', max_length=MAX_BODY_CHARS)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=MAX_REASON_CHARS)
 
 
 class FollowupService:
@@ -65,15 +65,11 @@ class FollowupService:
         correspondence = await CaseMailbox.objects.filter(case_id=current.id).afirst()
         if correspondence is None or not correspondence.selected_thread:
             return 'Please find the case email thread before planning automatic sends.'
-        row = await DraftRevisions(self.mailbox).resolve(turn, selection, current,
+        source = await DraftRevisions(self.mailbox).read(turn, selection, current,
             correspondence.mailbox, correspondence.selected_thread, action.draft_version)
-        with self.mailbox() as mailbox:
-            envelope = await sync_to_async(mailbox.read_draft)(row.gmail_id, row.mailbox)
-        if (envelope.thread_id != row.thread_id or not envelope.thread_id
-                or DraftRevisions.address(envelope.recipient) != DraftRevisions.address(row.recipient)):
-            return 'The draft recipient or thread changed. Please review a fresh draft before approving sends.'
-        await MonitoringStore().control(turn.followup(), selection, current, 'gmail_monitor_start', now)
-        return await self.store.propose(turn, selection, current, envelope, row.draft.version,
+        envelope = source.envelope
+        await MonitoringStore().control(turn.followup(), selection, current, 'gmail_monitor_start', now, automatic=True)
+        return await self.store.propose(turn, selection, current, envelope, source.version,
             action.followup_interval_minutes, action.followup_maximum, now)
 
 
@@ -113,6 +109,14 @@ class FollowupWorker:
             await self.store.pause(job, reason)
             return reason
         if job.count == 0:
+            policy = await CaseFollowup.objects.aget(pk=job.identifier)
+            export = await GmailDraftExport.objects.aget(draft__case_id=job.case_id, draft__version=policy.draft_version)
+            with self.mailbox() as mailbox:
+                current_draft = await sync_to_async(mailbox.read_draft)(export.gmail_id, job.first.mailbox)
+            if current_draft != job.first:
+                reason = 'The approved draft changed before sending. Please review it and approve a fresh plan.'
+                await self.store.pause(job, reason)
+                return reason
             if set(job.baseline) != {m.message_id for m in evidence.items}:
                 reason = 'The thread changed after the sending plan was prepared. Please review it and approve a fresh plan.'
                 await self.store.pause(job, reason)
@@ -156,6 +160,11 @@ class FollowupWorker:
             if self.store.locked(job) is None:
                 return ''
             with self.mailbox() as mailbox, tracing.operation('gmail.send', asdict(envelope), private=True) as span:
-                identifier = mailbox.send_message(envelope)
+                draft_id = ''
+                if job.count == 0:
+                    policy = CaseFollowup.objects.get(pk=job.identifier)
+                    export = GmailDraftExport.objects.get(draft__case_id=job.case_id, draft__version=policy.draft_version)
+                    draft_id = export.gmail_id
+                identifier = mailbox.send_message(envelope, draft_id)
                 tracing.record_output(span, {'message_id': identifier, 'status': 'sent'})
                 return identifier

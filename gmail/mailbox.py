@@ -173,7 +173,7 @@ class Mailbox:
             except (ValueError, TypeError, GmailError):
                 raise DraftOutcomeUnknown('Google returned an unclear creation result. Check Gmail Drafts before retrying.') from None
 
-    def send_message(self, draft: DraftEnvelope) -> str:
+    def send_message(self, draft: DraftEnvelope, draft_id: str = '') -> str:
         """Send exactly the approved snapshot; callers own durable authorization/handoff."""
         with self.connection.connected() as connection:
             self.connection.validate(connection.credentials, require_compose=True)
@@ -190,7 +190,9 @@ class Mailbox:
                 message['References'] = (draft.references + ' ' + draft.reply_id).strip()
             message.set_content(draft.body)
             payload = {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode(), 'threadId': draft.thread_id}
-            response = self.http.post(constants.API_URL + '/messages/send', json=payload,
+            endpoint = '/drafts/send' if draft_id else '/messages/send'
+            request: dict[str, Any] = {'id': self._identifier(draft_id), 'message': payload} if draft_id else payload
+            response = self.http.post(constants.API_URL + endpoint, json=request,
                 headers={'Authorization': 'Bearer ' + str(connection.credentials.token)}, follow_redirects=False)
             if response.status_code != 200:
                 raise GmailError('Google did not confirm sending. Check Sent Mail before taking another action.')

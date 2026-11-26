@@ -120,3 +120,16 @@ class FollowupSend(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['policy', 'generation', 'sequence'], name='unique_followup_handoff')]
+
+
+class FollowupApproval(models.Model):
+    """Immutable terms of each owner approval, retained when the next plan replaces it."""
+    policy: models.ForeignKey[CaseFollowup, CaseFollowup] = models.ForeignKey(CaseFollowup, on_delete=models.CASCADE)
+    generation: models.PositiveIntegerField[int, int] = models.PositiveIntegerField()
+    approved_at: models.DateTimeField[datetime, datetime] = models.DateTimeField()
+    conversation_id: models.CharField[str, str] = models.CharField(max_length=128)
+    delivery_id: models.CharField[str, str] = models.CharField(max_length=128)
+    terms = models.JSONField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['policy', 'generation'], name='unique_followup_approval')]

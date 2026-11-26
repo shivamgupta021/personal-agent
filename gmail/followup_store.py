@@ -7,7 +7,7 @@ from django.db import transaction
 
 from core.turns import OwnerTurn
 from gmail.followup_constants import FollowupStatus, LEASE_SECONDS, SendStatus
-from gmail.models import CaseFollowup, CaseMonitor, FollowupSend, MonitorNotification
+from gmail.models import CaseFollowup, CaseMonitor, FollowupSend, MonitorNotification, FollowupApproval
 from gmail.monitoring_store import MonitoringStore
 from gmail.records import DraftEnvelope
 from grievances.mutations import CaseMutation
@@ -33,6 +33,14 @@ class FollowupJob:
 
 
 class FollowupStore:
+    @staticmethod
+    def cadence(minutes: int) -> str:
+        for size, unit in ((1440, 'day'), (60, 'hour'), (1, 'minute')):
+            if minutes % size == 0:
+                count = minutes // size
+                return f'{count} {unit}{"s" if count != 1 else ""}'
+        return f'{minutes} minutes'
+
     @staticmethod
     def eligible(policy: CaseFollowup) -> bool:
         monitor = policy.monitor
@@ -60,7 +68,9 @@ class FollowupStore:
             existing = CaseFollowup.objects.filter(case_id=current.id).first()
             if existing and existing.status in (FollowupStatus.ACTIVE, FollowupStatus.UNKNOWN):
                 return 'This case already has an active or unconfirmed send plan. Stop it and inspect Sent Mail before replacing it.'
-            if existing and existing.sent_count and existing.envelope == asdict(envelope):
+            if FollowupSend.objects.filter(policy__case_id=current.id, sequence=0,
+                    envelope__mailbox=envelope.mailbox, envelope__recipient=envelope.recipient,
+                    envelope__thread_id=envelope.thread_id, envelope__body=envelope.body).exists():
                 return 'That approved message has already been sent. Please review a new draft before starting another sending plan.'
             policy, _ = CaseFollowup.objects.update_or_create(case_id=current.id, defaults={
                 'monitor': monitor, 'status': FollowupStatus.PROPOSED,
@@ -70,7 +80,7 @@ class FollowupStore:
                 'sent_count': 0, 'next_due': now, 'approved_at': None, 'reason': ''})
             mutation.record('followup_propose', mutation.case)
             return (f'For {current.label}, I’ll send draft v{version} to {envelope.recipient}, then follow up '
-                f'every {interval} minutes, at most {maximum} times. Follow-ups stay in this thread and become '
+                f'every {self.cadence(interval)}, at most {maximum} follow-up{"s" if maximum != 1 else ""}. Follow-ups stay in this thread and become '
                 'firmer when unanswered. I’ll pause for offers, payment claims, or questions needing your decision. '
                 'The local bot must remain running. Approve this sending plan, or tell me what to change.')
 
@@ -98,6 +108,11 @@ class FollowupStore:
             if not self.eligible(policy):
                 return 'The case or connection changed. Please request a fresh sending plan.'
             policy.status, policy.approved_at, policy.next_due = FollowupStatus.ACTIVE, now, now
+            FollowupApproval.objects.create(policy=policy, generation=policy.generation, approved_at=now,
+                delivery_id=turn.delivery_id, conversation_id=turn.conversation_id, terms={
+                    'envelope': policy.envelope, 'interval_minutes': policy.interval_minutes,
+                    'max_followups': policy.max_followups, 'draft_version': policy.draft_version,
+                    'fact_revision': policy.fact_revision})
             policy.save(update_fields=['status', 'approved_at', 'next_due'])
             mutation.record('followup_approve', mutation.case)
             return 'Sending plan approved. I’ll send the reviewed message and keep you updated here.'
@@ -112,6 +127,7 @@ class FollowupStore:
                 if not self.eligible(policy):
                     policy.status, policy.reason = FollowupStatus.PAUSED, 'Case, connection, or monitoring changed.'
                     policy.save(update_fields=['status', 'reason'])
+                    self.notify(policy, 'Automatic sending paused. ' + policy.reason)
                     continue
                 if FollowupSend.objects.filter(policy=policy, generation=policy.generation, sequence=policy.sent_count).exists():
                     policy.status, policy.reason = FollowupStatus.UNKNOWN, 'Previous send outcome is unconfirmed. Check Sent Mail; no automatic retry.'
@@ -164,6 +180,8 @@ class FollowupStore:
             policy = attempt.policy
             attempt.status, attempt.message_id = (SendStatus.SENT if message_id else SendStatus.UNKNOWN), message_id
             attempt.save(update_fields=['status', 'message_id'])
+            if policy.generation != job.generation:
+                return
             if policy.status not in (FollowupStatus.ACTIVE, FollowupStatus.UNKNOWN):
                 if message_id:
                     policy.sent_count += 1

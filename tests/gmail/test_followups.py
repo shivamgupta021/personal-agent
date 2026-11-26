@@ -23,8 +23,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from core.turns import OwnerTurn, PreparedReply
 from gmail.correspondence import Correspondence
 from gmail.followup_constants import FollowupStatus
-from gmail.models import CaseFollowup, CaseMailbox, EmailConsent, FollowupSend, GmailDraftExport
+from gmail.models import CaseMonitor, FollowupApproval, CaseFollowup, CaseMailbox, EmailConsent, FollowupSend, GmailDraftExport
 from gmail.monitoring import MonitoringWorker
+from gmail.monitoring_store import MonitoringStore
 from gmail.records import DraftEnvelope, ImportedMessage, MailResult
 from grievances.models import CaseFactRevision, CaseOperationReceipt, CaseSelection, ComplaintDraft, GrievanceCase
 from grievances.service import ApplicationService
@@ -42,7 +43,7 @@ class SendingMailbox(MonitoringMailbox):
         self.verify_account(mailbox)
         return self.envelope
 
-    def send_message(self, draft: DraftEnvelope) -> str:
+    def send_message(self, draft: DraftEnvelope, draft_id: str = '') -> str:
         self.verify_account(draft.mailbox)
         self.sent.append(draft)
         identifier = 'sent' + str(len(self.sent))
@@ -182,6 +183,8 @@ def test_sending_stops_when_authority_or_evidence_is_lost(interruption: str) -> 
     h.tick()
     assert len(h.mailbox.sent) == (1 if interruption == 'unknown' else 0)
     assert CaseFollowup.objects.get(case=h.case).status != FollowupStatus.ACTIVE
+    if interruption == 'changed_facts':
+        assert any('Automatic sending paused' in text for text in h.notifications)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -195,16 +198,31 @@ def test_changed_gmail_draft_requires_a_fresh_plan() -> None:
     assert not h.mailbox.sent
 
 
-def test_gmail_send_uses_exact_envelope_and_official_endpoint(tmp_path: Path) -> None:
+@pytest.mark.django_db(transaction=True)
+def test_draft_edited_after_approval_is_not_sent() -> None:
+    h = FollowupHarness()
+    h.approve()
+    h.mailbox.envelope = DraftEnvelope('owner@example.com', 'support@example.com', 'Re: Refund',
+        'Changed after approval.', 'thread1', '<old@example.com>')
+    h.tick()
+    assert not h.mailbox.sent
+    assert CaseFollowup.objects.get().status == FollowupStatus.PAUSED
+
+
+@pytest.mark.parametrize('draft_id', ['', 'draft1'])
+def test_gmail_send_uses_exact_envelope_and_official_endpoint(tmp_path: Path, draft_id: str) -> None:
     credentials = MemoryCredentials()
     assert credentials.connection is not None
     credentials.connection.credentials._scopes = list(COMPOSE_SCOPES)
     calls: list[httpx2.Request] = []
     def send(request: httpx2.Request) -> httpx2.Response:
         calls.append(request)
-        payload = json.loads(request.content)
+        request_body = json.loads(request.content)
+        payload = request_body['message'] if draft_id else request_body
+        if draft_id:
+            assert request_body['id'] == draft_id
         message = BytesParser().parsebytes(base64.urlsafe_b64decode(payload['raw']))
-        assert request.url.path == '/gmail/v1/users/me/messages/send'
+        assert request.url.path == '/gmail/v1/users/me/' + ('drafts/send' if draft_id else 'messages/send')
         assert request.method == 'POST'
         assert message['To'] == 'support@example.com'
         assert message['Cc'] is None and message['Bcc'] is None
@@ -216,5 +234,42 @@ def test_gmail_send_uses_exact_envelope_and_official_endpoint(tmp_path: Path) ->
     with httpx2.Client(transport=httpx2.MockTransport(send)) as http:
         mailbox = Mailbox(GmailService(credentials, ProfileGoogle(), tmp_path), http)
         result = mailbox.send_message(DraftEnvelope('owner@example.com', 'support@example.com', 'Re: Refund',
-            'Please refund the cancelled purchase.', 'abc1', '<prior@example.com>', marker='test-1'))
+            'Please refund the cancelled purchase.', 'abc1', '<prior@example.com>', marker='test-1'), draft_id)
     assert result == 'abc2' and len(calls) == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_replacing_an_unsent_proposal_does_not_erase_sent_history() -> None:
+    h = FollowupHarness()
+    h.approve()
+    h.tick()
+    h.say('Stop automatic sending')
+    original = h.mailbox.envelope
+    h.mailbox.envelope = DraftEnvelope(original.mailbox, original.recipient, original.subject,
+        'A different request for review.', original.thread_id, original.reply_id)
+    assert 'Approve this sending plan' in h.say('Prepare automatic sending')
+    h.mailbox.envelope = original
+    assert 'already been sent' in h.say('Prepare automatic sending')
+    assert FollowupSend.objects.count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_original_approval_survives_plan_replacement() -> None:
+    h = FollowupHarness()
+    h.approve()
+    approval = FollowupApproval.objects.get()
+    original_terms = approval.terms
+    h.say('Stop automatic sending')
+    h.say('Prepare automatic sending')
+    approval.refresh_from_db()
+    assert approval.terms == original_terms
+    assert approval.generation != CaseFollowup.objects.get().generation
+
+
+@pytest.mark.django_db(transaction=True)
+def test_proposal_does_not_override_explicit_monitoring_stop() -> None:
+    h = FollowupHarness()
+    h.say('Prepare automatic sending')
+    MonitoringStore.stop(CaseMonitor.objects.get(), 'owner stopped')
+    assert 'Approve this sending plan' not in h.say('Prepare automatic sending')
+    assert not CaseMonitor.objects.get().active
