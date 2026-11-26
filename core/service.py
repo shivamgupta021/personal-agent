@@ -10,6 +10,7 @@ from conversations.constants import DELETE_CONVERSATION_PHRASES
 from conversations.memory import ConversationMemoryRunner
 from conversations.service import ConversationService
 from core.routing import IntentRouter
+from core.routine import RoutineTools
 from core.tracing import tracing
 from core.turns import OwnerTurn, PreparedReply
 from gmail.correspondence import Correspondence
@@ -25,10 +26,12 @@ class ApplicationService:
     def __init__(self, model: Model, public_run: Callable[[str], Awaitable[str]] | None = None, *,
                  firecrawl: Firecrawl | None = None, trace_cleanup: CaseTraceCleanup | None = None,
                  correspondence: Correspondence | None = None,
-                 progress: Callable[[PreparedReply], Awaitable[None]] | None = None) -> None:
+                 progress: Callable[[PreparedReply], Awaitable[None]] | None = None,
+                 routine_tools: bool = False) -> None:
         self.model = model
         self.public_run = public_run
         self.router = IntentRouter(model)
+        self.routine_tools = RoutineTools(model) if routine_tools else None
         self.cases = CaseService(model, firecrawl=firecrawl, trace_cleanup=trace_cleanup,
             correspondence=correspondence, progress=progress)
         self.turns = ApplicationTurn(trace_cleanup)
@@ -52,7 +55,13 @@ class ApplicationService:
         replay = await self.cases.store.replay(turn)
         if replay:
             return replay
-        route = await self.router.route(turn)
+        if self.routine_tools is not None:
+            decision = await self.routine_tools.run(turn, epoch)
+            if isinstance(decision, str):
+                return decision
+            route = decision
+        else:
+            route = await self.router.route(turn)
         if route.specialist == 'grievance':
             answer = await self.cases.execute(turn, epoch)
             if route.conversation_question:

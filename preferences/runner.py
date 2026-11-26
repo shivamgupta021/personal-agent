@@ -12,12 +12,14 @@ from conversations.context import ConversationContext
 from conversations.facts import FactCleanup
 from conversations.recall import ArchiveRecall
 from preferences.service import PreferenceReply, PreferenceService
+from preferences.schema import PreferenceIntent
 
 
 class PreferenceRunner:
-    def __init__(self, model: Model, usage: RunUsage) -> None:
+    def __init__(self, model: Model, usage: RunUsage, intent: PreferenceIntent | None = None) -> None:
         self.model = model
         self.usage = usage
+        self.intent = intent
 
     async def run_turn(self, message: str, context: ConversationContext,
                        forget: Callable[[], Awaitable[str]], recall: ArchiveRecall,
@@ -27,7 +29,8 @@ class PreferenceRunner:
         ctx = RunContext(deps=None, model=self.model, usage=self.usage)
         with tracing.operation('preferences.manage', {'request': message}, kind='tool', private=True) as span:
             try:
-                result = await preferences.manage_preferences(ctx)
+                result = (await preferences.execute_intent(ctx, self.intent) if self.intent is not None
+                          else await preferences.manage_preferences(ctx))
                 receipt = result.message
                 await preferences.persist_reply(receipt)
             except PreferenceReply as reply:

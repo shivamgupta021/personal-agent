@@ -30,6 +30,16 @@ class IntentRouter:
         self.agent.instrument = tracing.private_instrumentation()
 
     async def route(self, turn: OwnerTurn) -> Route:
+        payload = await self.payload(turn)
+        with tracing.operation('orchestrator.route', {'message': turn.text}, kind='agent', private=True) as span:
+            result = await self.agent.run(json.dumps(payload),
+                usage_limits=UsageLimits(request_limit=ROUTING_REQUEST_LIMIT), timeout=ROUTING_TIMEOUT_SECONDS)
+            span.set_attribute('orchestrator.specialist', result.output.specialist)
+            tracing.record_output(span, result.output.model_dump())
+            return result.output
+
+    @staticmethod
+    async def payload(turn: OwnerTurn) -> dict[str, object]:
         selection = await CaseStore().selection(turn.owner_id, turn.conversation_id)
         context = await ConversationStore().context(turn.owner_id)
         recent = DirectConversation.dialogue(context)[-ROUTING_HISTORY_MESSAGES:]
@@ -41,10 +51,5 @@ class IntentRouter:
             remaining -= len(content)
             if remaining <= 0:
                 break
-        with tracing.operation('orchestrator.route', {'message': turn.text}, kind='agent', private=True) as span:
-            result = await self.agent.run(json.dumps({'message': turn.text,
-                'has_selected_case': bool(selection.case_id), 'recent_conversation': history}),
-                usage_limits=UsageLimits(request_limit=ROUTING_REQUEST_LIMIT), timeout=ROUTING_TIMEOUT_SECONDS)
-            span.set_attribute('orchestrator.specialist', result.output.specialist)
-            tracing.record_output(span, result.output.model_dump())
-            return result.output
+        return {'message': turn.text, 'has_selected_case': bool(selection.case_id),
+                'recent_conversation': history}

@@ -10,3 +10,6 @@ LANGFUSE_SECRET_KEY = ''
 LANGFUSE_CAPTURE_PRIVATE_CONTENT = False
 
 LANGFUSE_CAPTURE_EMAIL_CONTENT = False
+
+# Test both routing modes explicitly; local rollout settings must not select fixtures.
+ROUTINE_TOOLS_ENABLED = False

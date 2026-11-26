@@ -2,6 +2,7 @@
 import asyncio
 from dataclasses import replace
 from collections.abc import Awaitable, Callable
+from django.conf import settings
 
 from core.actions import CaseAction
 from core.errors import user_error_message
@@ -46,7 +47,8 @@ class SubscriptionApplicationService:
         try:
             async with self.subscription.model() as model:
                 return await ApplicationService(model, self.defer_public,
-                    correspondence=Correspondence(GmailFactory.mailbox, GmailQueryPlanner(model), GmailFactory.require_connection), progress=self.progress)._execute(turn, epoch)
+                    correspondence=Correspondence(GmailFactory.mailbox, GmailQueryPlanner(model), GmailFactory.require_connection),
+                    progress=self.progress, routine_tools=settings.ROUTINE_TOOLS_ENABLED)._execute(turn, epoch)
         except GmailConnectionRequested as request:
             if self.connect_gmail is None:
                 return 'Gmail connection setup is available through the Telegram application on this Mac.'
