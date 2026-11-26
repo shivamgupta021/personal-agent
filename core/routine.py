@@ -14,6 +14,7 @@ from core.routine_prompts import ROUTINE_INSTRUCTIONS
 from core.tracing import tracing
 from core.turns import OwnerTurn
 from grievances.mutations import CaseMutation
+from grievances.models import CaseMessage
 from grievances.schema import FactKey
 from grievances.store import CaseStore, CaseView, SelectionView
 from preferences.inspection import PreferenceInspection
@@ -46,6 +47,8 @@ class RoutineTools:
         current = await store.get_case(turn.owner_id, selection.case_id) if selection.case_id else None
         payload = await IntentRouter.payload(turn)
         payload['selected_case_label'] = current.label if current else None
+        payload['has_attachment_evidence'] = bool(current and await CaseMessage.objects.filter(
+            case_id=current.id, case__owner_id=turn.owner_id, role='attachment').aexists())
         payload['current_preferences'] = [{'key': p.key, 'value': p.value}
                                          for p in await PreferenceStore().list(turn.owner_id)]
         usage = RunUsage()
